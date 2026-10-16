@@ -1,0 +1,31 @@
+{
+  "name": "master-node (Zephyr v4.4.2)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "dev",
+
+  // West workspace layout inside the container:
+  //   /workdir/              named volume (Zephyr + modules, survives rebuilds)
+  //   /workdir/master-node/  this folder, bind-mounted from the host
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/master-node,type=bind,z",
+  "workspaceFolder": "/workdir/master-node",
+  "mounts": ["source=master-node-zephyr,target=/workdir,type=volume"],
+
+  // First start downloads Zephyr + needed modules (a few minutes); later starts are instant
+  "postCreateCommand": "cd /workdir && (test -d .west || west init -l master-node) && west update --narrow -o=--depth=1",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cmake-tools",
+        "nordic-semiconductor.nrf-devicetree",
+        "nordic-semiconductor.nrf-kconfig"
+      ]
+    }
+  }
+}

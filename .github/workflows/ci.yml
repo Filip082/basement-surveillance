@@ -56,6 +56,23 @@ jobs:
             camera-node/build/bootloader/bootloader.bin
             camera-node/build/partition_table/partition-table.bin
 
+  master-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Creates a west workspace from master-node/west.yml and installs the Zephyr SDK
+      - uses: zephyrproject-rtos/action-zephyr-setup@v1.0.15
+        with:
+          app-path: master-node
+          toolchains: arm-zephyr-eabi
+      - run: west build -b xiao_ble master-node -d master-node/build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: master-node-firmware
+          path: |
+            master-node/build/zephyr/zephyr.uf2
+            master-node/build/zephyr/zephyr.hex
+
   docker:
     runs-on: ubuntu-latest
     steps:

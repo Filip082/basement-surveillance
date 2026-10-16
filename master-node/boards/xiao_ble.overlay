@@ -1,0 +1,34 @@
+/*
+ * Wio-SX1262 LoRa module on the XIAO nRF52840.
+ *
+ * Module stacked on the XIAO pin headers, as shipped in Seeed's
+ * "XIAO nRF52840 + Wio-SX1262" kit (same pinout as Meshtastic variant
+ * seeed_xiao_nrf52840_kit). The Wio-SX1262 from the XIAO ESP32-S3 kit is wired
+ * differently, so don't swap modules between kits without changing these pins.
+ */
+
+#include <zephyr/dt-bindings/lora/sx126x.h>
+
+/ {
+	aliases {
+		lora0 = &lora0;
+	};
+};
+
+&xiao_spi {
+	status = "okay";
+	cs-gpios = <&xiao_d 4 GPIO_ACTIVE_LOW>;		/* D4: NSS */
+
+	lora0: lora@0 {
+		compatible = "semtech,sx1262";
+		reg = <0>;
+		spi-max-frequency = <DT_FREQ_M(8)>;
+		reset-gpios = <&xiao_d 2 GPIO_ACTIVE_LOW>;	/* D2 */
+		busy-gpios = <&xiao_d 3 GPIO_ACTIVE_HIGH>;	/* D3 */
+		dio1-gpios = <&xiao_d 1 GPIO_ACTIVE_HIGH>;	/* D1 */
+		rx-enable-gpios = <&xiao_d 5 GPIO_ACTIVE_HIGH>;	/* D5: RF switch RX side */
+		dio2-tx-enable;					/* DIO2 drives RF switch TX side */
+		dio3-tcxo-voltage = <SX126X_DIO3_TCXO_1V8>;
+		tcxo-power-startup-delay-ms = <5>;
+	};
+};

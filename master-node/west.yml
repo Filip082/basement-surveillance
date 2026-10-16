@@ -1,0 +1,19 @@
+# West workspace manifest: pins the Zephyr version for everyone (devcontainer + CI).
+# Only the modules this board needs are fetched, to keep the download small.
+manifest:
+  self:
+    path: master-node
+
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: v4.4.2
+      import:
+        name-allowlist:
+          - cmsis_6
+          - hal_nordic
+          - loramac-node
