@@ -1,0 +1,58 @@
+# Development stack for the server side of the system.
+# Configuration lives in .env (copy from .env.example).
+#
+#   [border-router] --HTTP--> [backend] <--> [db]
+#                                 ^
+#               [frontend] -------+  (Vite dev server, proxies /api)
+
+name: basement-surveillance
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      - ./backend:/app:z
+      - /app/node_modules
+      - images:/data/images
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    image: node:24-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app:z
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+    command: sh -c "npm install && npm run dev"
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+
+volumes:
+  db-data:
+  images:

@@ -147,3 +147,16 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# --- Project additions ---
+# Local experiments, not part of the project
+playground/
+
+# Personal tooling config
+.serena/
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
