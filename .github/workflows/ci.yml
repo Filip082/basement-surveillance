@@ -37,6 +37,25 @@ jobs:
       - run: npm run lint
       - run: npm run build
 
+  camera-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Same ESP-IDF image as camera-node/.devcontainer
+      - uses: espressif/esp-idf-ci-action@v1.2.0
+        with:
+          esp_idf_version: v6.1
+          target: esp32s3
+          path: camera-node
+      - uses: actions/upload-artifact@v7
+        with:
+          name: camera-node-firmware
+          path: |
+            camera-node/build/flash_args
+            camera-node/build/*.bin
+            camera-node/build/bootloader/bootloader.bin
+            camera-node/build/partition_table/partition-table.bin
+
   docker:
     runs-on: ubuntu-latest
     steps:

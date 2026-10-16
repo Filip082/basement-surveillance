@@ -1,0 +1,30 @@
+{
+  "name": "camera-node (ESP-IDF v6.1)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "dev",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,z",
+  "workspaceFolder": "/workspace",
+
+  // Serial access for flashing from inside the container (Linux hosts).
+  // /dev is bind-mounted so the board can be unplugged and replugged without
+  // restarting the container. Windows/macOS: flash from the host instead (see README).
+  "runArgs": ["--privileged"],
+  "mounts": ["source=/dev,target=/dev,type=bind"],
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "idf.espIdfPath": "/opt/esp/idf",
+        "idf.toolsPath": "/opt/esp",
+        "idf.gitPath": "/usr/bin/git"
+      },
+      "extensions": [
+        "espressif.esp-idf-extension",
+        "ms-vscode.cpptools"
+      ]
+    }
+  }
+}
