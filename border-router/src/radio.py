@@ -259,12 +259,10 @@ class SX1262Transceiver:
                         if state == radio.STATUS_RX_DONE:
                             raw = radio.get(radio.available())
                             rssi, snr = radio.packetRssi(), radio.snr()
+                            LOG.info("LoRa RX bytes=%d rssi=%s dBm snr=%s dB", len(raw), rssi, snr)
+                            LOG.debug("LoRa RX raw=%s", raw.hex())
                             try:
-                                if controller.on_frame(raw, rssi=rssi, snr=snr):
-                                    LOG.info(
-                                        "Complete message assembled: %d bytes in radio packet",
-                                        len(raw),
-                                    )
+                                controller.on_frame(raw, rssi=rssi, snr=snr)
                             except ProtocolError as exc:
                                 LOG.warning("Rejected received frame: %s", exc)
                         elif state in (radio.STATUS_CRC_ERR, radio.STATUS_HEADER_ERR):

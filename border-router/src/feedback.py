@@ -150,12 +150,40 @@ class FeedbackController:
         packet = decode_frame(raw)
         self.last_rx_at = time.monotonic() if now is None else now
         if isinstance(packet, Fragment):
-            return self.store.accept(packet, rssi=rssi, snr=snr)
+            LOG.info(
+                "LoRa DATA device=%d kind=%s id=%d part=%d/%d payload_bytes=%d total_bytes=%d",
+                packet.device_id,
+                packet.kind.name,
+                packet.message_id,
+                packet.index + 1,
+                packet.count,
+                len(packet.data),
+                packet.total_size,
+            )
+            completed = self.store.accept(packet, rssi=rssi, snr=snr)
+            if completed:
+                LOG.info(
+                    "LoRa message complete device=%d kind=%s id=%d bytes=%d "
+                    "crc32=%08x stored=SQLite",
+                    packet.device_id,
+                    packet.kind.name,
+                    packet.message_id,
+                    packet.total_size,
+                    packet.crc32,
+                )
+            return completed
         if packet.kind == Kind.END:
             meta = self.store.register_end(packet)
             key = (meta.device_id, int(meta.kind), meta.message_id)
             self.pending[key] = None
-            LOG.debug("END received for %s", key)
+            LOG.info(
+                "LoRa END device=%d kind=%s id=%d parts=%d total_bytes=%d; feedback queued",
+                meta.device_id,
+                meta.kind.name,
+                meta.message_id,
+                meta.count,
+                meta.total_size,
+            )
         else:
             LOG.debug("Ignoring peer %s: receiver only handles DATA and END", packet.kind.name)
         return False

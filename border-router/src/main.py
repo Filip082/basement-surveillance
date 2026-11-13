@@ -19,7 +19,7 @@ LOG = logging.getLogger(__name__)
 
 
 def run(argv: list[str] | None = None) -> int:
-    """Start the radio or stdin simulator and persistent HTTP worker, then shut down both cleanly.
+    """Start radio reception or stdin simulation with optional persistent HTTP forwarding.
 
     Args:
         argv (list[str] | None): CLI arguments without the program name; None uses sys.argv.
@@ -30,6 +30,11 @@ def run(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="SX1262 -> reliable messages -> HTTP backend")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--simulate-hex", action="store_true", help="accept hex radio frames on stdin")
+    ap.add_argument(
+        "--no-http",
+        action="store_true",
+        help="test LoRa with HTTP forwarding disabled; keep received messages in SQLite",
+    )
     ap.add_argument("--db", default=os.getenv("BORDER_DB", "./router-v1.sqlite3"))
     ap.add_argument("--backend-url", default=os.getenv("BACKEND_URL", "http://127.0.0.1:8000"))
     ap.add_argument("--gpio-chip", type=int, default=os.getenv("GPIO_CHIP", "0"))
@@ -79,7 +84,7 @@ def run(argv: list[str] | None = None) -> int:
             cr=opts.cr,
             duty_cycle=opts.duty_cycle,
         )
-        forwarder = HttpForwarder(opts.backend_url)
+        forwarder = None if opts.no_http else HttpForwarder(opts.backend_url)
         cfg = RadioConfig(
             gpio_chip=opts.gpio_chip,
             reset_gpio=opts.reset,
@@ -106,6 +111,7 @@ def run(argv: list[str] | None = None) -> int:
         Returns:
             None: This operation returns no value.
         """
+        assert forwarder is not None
         cycles = 0
         while not stop.is_set():
             for msg in store.ready():
@@ -127,8 +133,12 @@ def run(argv: list[str] | None = None) -> int:
                 store.cleanup()
             stop.wait(1.0)
 
-    worker = Thread(target=http_worker, name="http-forwarder", daemon=True)
-    worker.start()
+    worker = None
+    if forwarder is None:
+        LOG.info("HTTP forwarding disabled; LoRa RX, ACK/NACK and SQLite persistence remain active")
+    else:
+        worker = Thread(target=http_worker, name="http-forwarder", daemon=True)
+        worker.start()
     try:
         if opts.simulate_hex:
             LOG.info("Enter one hex-encoded radio frame per line. Feedback is printed in hex.")
@@ -147,7 +157,12 @@ def run(argv: list[str] | None = None) -> int:
                 except ValueError as exc:
                     LOG.warning("Invalid incoming frame: %s", exc)
             deadline = time.monotonic() + 5.0
-            while store.ready() and time.monotonic() < deadline and not stop.is_set():
+            while (
+                worker is not None
+                and store.ready()
+                and time.monotonic() < deadline
+                and not stop.is_set()
+            ):
                 time.sleep(0.1)
         else:
             SX1262Transceiver(cfg).run(stop.is_set, controller)
@@ -157,7 +172,8 @@ def run(argv: list[str] | None = None) -> int:
     finally:
         stop.set()
         # The worker may still own the shared connection during an HTTP retry.
-        worker.join()
+        if worker is not None:
+            worker.join()
         store.close()
     return 0
 

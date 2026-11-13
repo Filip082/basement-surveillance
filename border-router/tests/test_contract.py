@@ -3,6 +3,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -137,7 +138,7 @@ class ContractTests(unittest.TestCase):
                 self.assertEqual(store.ready()[0].idempotency_key, "bs-v1:7:1:9")
             finally:
                 store.close()
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db:
                 db.execute("PRAGMA user_version=3")
             with self.assertRaisesRegex(RuntimeError, "fresh router-v1"):
                 MessageStore(path)

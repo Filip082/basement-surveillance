@@ -68,6 +68,37 @@ docker compose logs -f border-router
 
 This starts the frontend, backend, database and router. To start just the router and its backend/database dependencies, use `docker compose --profile hardware up -d --build border-router`. Ordinary `docker compose up -d` omits the router because its `hardware` profile is optional.
 
+### Test only the LoRa connection
+
+The router can receive fragments, persist complete messages and send ACK/NACK without the backend, frontend or PostgreSQL. From the repository root, start a foreground radio-only container:
+
+```bash
+docker compose --profile hardware run --rm --no-deps --build border-router --no-http
+```
+
+`--no-deps` skips the backend/database startup dependency, and `--no-http` disables the HTTP worker. The radio still uses the mapped SPI/GPIO devices, the persisted SQLite volume and the normal duty-cycle limiter. Stop the test with Ctrl+C. When the normal service is started later without `--no-http`, it forwards messages retained during the test.
+
+At the default INFO log level, expect:
+
+```text
+LoRa RX bytes=55 rssi=-90 dBm snr=7.25 dB
+LoRa DATA device=1 kind=ENTRY id=33 part=1/1 payload_bytes=33 total_bytes=33
+LoRa message complete device=1 kind=ENTRY id=33 bytes=33 crc32=... stored=SQLite
+LoRa END device=1 kind=ENTRY id=33 parts=1 total_bytes=33; feedback queued
+Sent ACK device=1 kind=ENTRY id=33
+```
+
+The numbers are illustrative. `LoRa RX` confirms a PHY-valid radio packet even if its application framing is rejected. DATA logs identify each received fragment with a one-based position; protocol fragment indices remain zero-based. The completion log confirms whole-body CRC validation and durable storage. END queues feedback, and `Sent ACK` confirms a radio transmit attempt completed. Raw packet hex is available with `--log-level DEBUG`.
+
+For the normal service in the background, while leaving dependencies stopped:
+
+```bash
+docker compose --profile hardware up -d --no-deps --build border-router
+docker compose logs -f border-router
+```
+
+This second command sequence keeps HTTP forwarding enabled, so an absent backend produces retry warnings while radio reception and ACK/NACK continue. Plain `docker compose up border-router` also starts the backend and database through `depends_on`; it does not start the frontend. Use the foreground `--no-http` test above for quiet, backend-free diagnostics. Run one router container at a time because the radio devices have a single owner.
+
 The router service in the parent Compose file provides:
 
 | Configuration | Value and purpose |
@@ -227,7 +258,7 @@ The backend must deduplicate this key: a successful response can be lost before 
 
 Partial assemblies expire after two days without progress. Sent records retain deduplication metadata for seven days; undelivered complete bodies are retained. Do not reuse message IDs during that window. Keep SQLite on persistent local storage with enough space; deleting the database also deletes pending messages, deduplication state and airtime accounting.
 
-`--backend-url` accepts an HTTP(S) origin, including a Docker hostname such as `http://backend:8000`. `127.0.0.1` addresses the router's own network namespace. The companion `backend/src/index.js` currently exposes only a health endpoint, and `master-node/src/main.c` is a Hello World stub. Their HTTP ingestion, deduplication and sender protocol still need implementation; this router and its development receiver can be tested independently.
+`--backend-url` accepts an HTTP(S) origin, including a Docker hostname such as `http://backend:8000`. `127.0.0.1` addresses the router's own network namespace. The companion `backend/src/index.js` currently exposes only a health endpoint, so HTTP ingestion and deduplication still need implementation. The [master-node demo](../master-node/README.md) can test the real LoRa DATA/END/ACK/NACK exchange with this router in `--no-http` mode.
 
 ## Run without radio hardware
 
