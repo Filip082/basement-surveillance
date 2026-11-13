@@ -29,6 +29,7 @@ services:
       - ./backend:/app:z
       - /app/node_modules
       - images:/data/images
+      - telemetry-logs:/data/logs
     env_file:
       - .env
     environment:
@@ -59,3 +60,4 @@ services:
 volumes:
   db-data:
   images:
+  telemetry-logs:
