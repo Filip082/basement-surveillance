@@ -8,7 +8,11 @@
   // West workspace layout inside the container:
   //   /workdir/              named volume (Zephyr + modules, survives rebuilds)
   //   /workdir/master-node/  this folder, bind-mounted from the host
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/master-node,type=bind,z",
+  // workspaceMount is passed to `docker run --mount`, which has no SELinux relabel
+  // option (",z" is rejected). Mount via -v with :z instead so it works on
+  // SELinux-enforcing hosts (Fedora/RHEL); the empty workspaceMount skips the default.
+  "workspaceMount": "",
+  "runArgs": ["-v", "${localWorkspaceFolder}:/workdir/master-node:z"],
   "workspaceFolder": "/workdir/master-node",
   "mounts": ["source=master-node-zephyr,target=/workdir,type=volume"],
 
