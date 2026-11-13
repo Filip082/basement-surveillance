@@ -4,13 +4,16 @@
     "dockerfile": "Dockerfile"
   },
   "remoteUser": "dev",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,z",
+  // workspaceMount is passed to `docker run --mount`, which has no SELinux relabel
+  // option (",z" is rejected). Mount via -v with :z instead so it works on
+  // SELinux-enforcing hosts (Fedora/RHEL); the empty workspaceMount skips the default.
+  "workspaceMount": "",
   "workspaceFolder": "/workspace",
 
   // Serial access for flashing from inside the container (Linux hosts).
   // /dev is bind-mounted so the board can be unplugged and replugged without
   // restarting the container. Windows/macOS: flash from the host instead (see README).
-  "runArgs": ["--privileged"],
+  "runArgs": ["--privileged", "-v", "${localWorkspaceFolder}:/workspace:z"],
   "mounts": ["source=/dev,target=/dev,type=bind"],
 
   "customizations": {
