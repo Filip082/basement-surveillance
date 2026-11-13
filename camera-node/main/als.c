@@ -1,21 +1,24 @@
 #include "als.h"
 
 #include <math.h>
-#include "esp_log.h"
+#include <stdio.h>
 #include "driver/i2c_master.h"
-
-static const char *TAG = "als";
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "node_log.h"
 
 #define LTR308_ADDR        0x53
-#define REG_MAIN_CTRL      0x00
-#define REG_ALS_MEAS_RATE  0x04
-#define REG_ALS_GAIN       0x05
-#define REG_PART_ID        0x06
+#define REG_MAIN_CTRL      0x00   /* bit1 = ALS enable */
+#define REG_ALS_MEAS_RATE  0x04   /* [6:4] resolution, [2:0] measurement rate */
+#define REG_ALS_GAIN       0x05   /* [2:0] gain */
+#define REG_PART_ID        0x06   /* 0xB1 */
+#define REG_MAIN_STATUS    0x07   /* bit3 = new data */
 #define REG_ALS_DATA_0     0x0D   /* 20-bit result in 0x0D..0x0F */
 
-#define ALS_GAIN_X         3.0f   /* register value 1 = 3x */
-#define ALS_INT_FACTOR     1.0f   /* 18-bit / 100 ms */
-
+#define MEAS_16BIT_25MS    0x40   /* resolution 100 (16 bit, 25 ms), rate 000 (25 ms) */
+#define GAIN_3X            0x01
+#define GAIN_FACTOR        3.0f
+#define INT_FACTOR         0.25f  /* 25 ms integration */
 #define I2C_TIMEOUT_MS     50
 
 static i2c_master_dev_handle_t s_dev;
@@ -44,15 +47,15 @@ esp_err_t als_init(void)
         i2c_master_bus_handle_t h = NULL;
         if (i2c_master_get_bus_handle(port, &h) == ESP_OK && h) {
             bus = h;
-            ESP_LOGI(TAG, "using the camera's I2C bus (port %d)", port);
+            NLOGI("als", "using the camera's I2C bus (port %d)", port);
         }
     }
     if (!bus) {
-        ESP_LOGW(TAG, "camera I2C bus not found - ambient light sensor unavailable");
+        NLOGW("als", "camera I2C bus not found - ambient light sensor unavailable");
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* Scan so the log shows what is really on the bus (camera = 0x3c). */
+    /* Scan once so the log shows what is really on the bus (camera = 0x3c). */
     char list[128] = "";
     size_t pos = 0;
     for (int addr = 0x08; addr < 0x78; addr++) {
@@ -60,7 +63,7 @@ esp_err_t als_init(void)
             pos += snprintf(list + pos, sizeof(list) - pos, "0x%02x ", addr);
         }
     }
-    ESP_LOGI(TAG, "I2C devices on bus: %s", pos ? list : "(none)");
+    NLOGI("als", "I2C devices on bus: %s", pos ? list : "(none)");
 
     const i2c_device_config_t dc = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -69,7 +72,7 @@ esp_err_t als_init(void)
     };
     esp_err_t err = i2c_master_bus_add_device(bus, &dc, &s_dev);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "add device failed: %s", esp_err_to_name(err));
+        NLOGW("als", "add device failed: %s", esp_err_to_name(err));
         s_dev = NULL;
         return err;
     }
@@ -77,31 +80,64 @@ esp_err_t als_init(void)
     uint8_t id = 0;
     err = reg_read(REG_PART_ID, &id, 1);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "LTR-308 (0x53) did not answer: %s - using camera exposure instead",
-                 esp_err_to_name(err));
+        NLOGW("als", "LTR-308 (0x53) did not answer: %s", esp_err_to_name(err));
         i2c_master_bus_rm_device(s_dev);
         s_dev = NULL;
         return err;
     }
-    ESP_LOGI(TAG, "LTR-308 part id 0x%02x (expected 0xb1)", id);
+    NLOGI("als", "LTR-308 part id 0x%02x (expected 0xb1)", id);
 
-    err = reg_write(REG_ALS_MEAS_RATE, 0x22);          /* 18-bit, 100 ms */
-    if (err == ESP_OK) err = reg_write(REG_ALS_GAIN, 0x01);   /* gain 3x */
-    if (err == ESP_OK) err = reg_write(REG_MAIN_CTRL, 0x02);  /* ALS active */
+    err = als_wake();                    /* writes the configuration */
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "LTR-308 configuration failed: %s", esp_err_to_name(err));
+        NLOGW("als", "LTR-308 configuration failed: %s", esp_err_to_name(err));
         i2c_master_bus_rm_device(s_dev);
         s_dev = NULL;
         return err;
     }
-    ESP_LOGI(TAG, "LTR-308 ambient light sensor ready");
+    als_standby();
     return ESP_OK;
 }
 
-esp_err_t als_read_lux(float *lux)
+esp_err_t als_wake(void)
 {
     if (!s_dev) {
         return ESP_ERR_INVALID_STATE;
+    }
+    /* Configuration is rewritten on every wake so a standby that lost it cannot hurt. */
+    esp_err_t err = reg_write(REG_ALS_MEAS_RATE, MEAS_16BIT_25MS);
+    if (err == ESP_OK) err = reg_write(REG_ALS_GAIN, GAIN_3X);
+    if (err == ESP_OK) err = reg_write(REG_MAIN_CTRL, 0x02);
+    return err;
+}
+
+void als_standby(void)
+{
+    if (s_dev) {
+        reg_write(REG_MAIN_CTRL, 0x00);
+    }
+}
+
+esp_err_t als_read_lux(float *lux, uint32_t timeout_ms)
+{
+    if (!s_dev) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* Wait for the first conversion after wake-up (new-data flag). */
+    uint32_t waited = 0;
+    for (;;) {
+        uint8_t st = 0;
+        esp_err_t err = reg_read(REG_MAIN_STATUS, &st, 1);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (st & 0x08) {
+            break;
+        }
+        if (waited >= timeout_ms) {
+            return ESP_ERR_TIMEOUT;
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+        waited += 5;
     }
     uint8_t d[3];
     esp_err_t err = reg_read(REG_ALS_DATA_0, d, sizeof(d));
@@ -109,7 +145,7 @@ esp_err_t als_read_lux(float *lux)
         return err;
     }
     uint32_t raw = (uint32_t)d[0] | ((uint32_t)d[1] << 8) | ((uint32_t)(d[2] & 0x0f) << 16);
-    *lux = 0.6f * (float)raw / (ALS_GAIN_X * ALS_INT_FACTOR);
+    *lux = 0.6f * (float)raw / (GAIN_FACTOR * INT_FACTOR);
     return ESP_OK;
 }
 

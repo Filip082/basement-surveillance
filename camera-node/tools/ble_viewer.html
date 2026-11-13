@@ -3,234 +3,73 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DFR1154 BLE camera viewer</title>
+<title>Camera node viewer</title>
 <style>
   body { font: 15px/1.4 system-ui, sans-serif; max-width: 760px; margin: 1.5rem auto; padding: 0 1rem; }
-  h1 { font-size: 1.3rem; }
-  fieldset { margin: 1rem 0; border: 1px solid #8884; border-radius: 6px; }
-  button, select, input { font: inherit; padding: .35rem .7rem; }
-  #view { max-width: 100%; background: #0002; min-height: 120px; display: block; }
-  #log { height: 12rem; overflow: auto; background: #1115; padding: .5rem; font: 12px/1.4 monospace; white-space: pre-wrap; }
-  .badge { padding: .15rem .6rem; border-radius: 1rem; background: #8883; font-weight: 600; }
-  .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .3rem 0; }
+  button { font: inherit; padding: .4rem .9rem; }
+  #view { max-width: 100%; background: #0002; min-height: 120px; display: block; margin: 1rem 0; }
+  #log { height: 10rem; overflow: auto; background: #1115; padding: .5rem; font: 12px/1.4 monospace; white-space: pre-wrap; }
 </style>
 </head>
 <body>
-<h1>DFR1154 BLE camera viewer</h1>
-<p>Needs Chrome or Edge (Web Bluetooth) opened from a local file or https. Firmware must be flashed first.</p>
-
-<fieldset>
-  <legend>Connection</legend>
-  <div class="row">
-    <button id="btnConnect">Connect</button>
-    <button id="btnDisconnect" disabled>Disconnect</button>
-    <button id="btnStatus" disabled>Read status</button>
-    <span id="state">not connected</span>
-  </div>
-</fieldset>
-
-<fieldset>
-  <legend>Camera</legend>
-  <div class="row">
-    <button id="btnCapture" disabled>Capture</button>
-    <label>Size
-      <select id="size">
-        <option value="0">QVGA 320x240</option>
-        <option value="1">VGA 640x480</option>
-        <option value="2">SVGA 800x600</option>
-        <option value="3">XGA 1024x768</option>
-        <option value="4">SXGA 1280x1024</option>
-        <option value="5">UXGA 1600x1200</option>
-      </select>
-    </label>
-    <label>Quality (8 best - 63 small) <input id="quality" type="number" min="8" max="63" value="12" style="width:4.5rem"></label>
-    <button id="btnApply" disabled>Apply</button>
-  </div>
-  <div class="row">
-    <label><input type="checkbox" id="led" disabled> LED (GPIO3)</label>
-    <label><input type="checkbox" id="ir" disabled> IR light (GPIO47, manual)</label>
-  </div>
-</fieldset>
-
-<fieldset>
-  <legend>Day / night (automatic IR)</legend>
-  <div class="row">
-    <label><input type="checkbox" id="auto" disabled> Automatic IR</label>
-    <span id="mode" class="badge">-</span>
-  </div>
-  <div class="row">
-    <label for="thr">Night threshold</label>
-    <input id="thr" type="range" min="0" max="100" value="40" disabled style="flex:1;min-width:10rem">
-    <b id="thrVal">40</b> <span id="thrLux" style="opacity:.7"></span>
-  </div>
-  <div class="row">
-    <label>Light level</label>
-    <meter id="meter" min="0" max="100" value="0" style="flex:1;min-width:10rem"></meter>
-    <b id="lightVal">-</b>
-  </div>
-  <div id="raw" style="font:12px monospace;opacity:.7"></div>
-  <small>The level is a log scale of the ambient light (0 = dark, 100 = about 50 000 lux). IR turns on when it
-    stays below the threshold and off again when it rises 10 levels above it. Drag the slider just above the current level to force night,
-    or far below to force day.</small>
-</fieldset>
-
-<img id="view" alt="captured frame">
+<h1>Camera node viewer</h1>
+<p>Manual receiver for testing, Chrome or Edge only. The node only advertises for
+<b>60 s after power-up / reset</b> (pairing window) and for a few seconds after each wake-up event, so
+click <b>Connect</b> right after resetting the node (or while triggering the wake-up input).
+For unattended use run <code>tools/receiver.py</code> instead.</p>
+<button id="btn">Connect</button>
+<img id="view" alt="received picture">
 <p id="info"></p>
 <div id="log"></div>
-
 <script>
-const SVC    = 'dfa10001-5b3c-4f6d-9e21-0a4c7b8d1e00';
-const CTRL   = 'dfa10002-5b3c-4f6d-9e21-0a4c7b8d1e00';
-const IMAGE  = 'dfa10003-5b3c-4f6d-9e21-0a4c7b8d1e00';
-const STATUS = 'dfa10004-5b3c-4f6d-9e21-0a4c7b8d1e00';
-
+const SVC  = 'dfa10001-5b3c-4f6d-9e21-0a4c7b8d1e00';
+const CTRL = 'dfa10002-5b3c-4f6d-9e21-0a4c7b8d1e00';   // write 0x01 = ACK, 0x02 = resend
+const IMG  = 'dfa10003-5b3c-4f6d-9e21-0a4c7b8d1e00';   // notify
 const $ = id => document.getElementById(id);
-let device, ctrl, status, rx = null;
+const log = m => { const e = $('log'); e.textContent += `[${new Date().toLocaleTimeString()}] ${m}\n`; e.scrollTop = e.scrollHeight; };
 
-function log(msg) {
-  const el = $('log');
-  el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-  el.scrollTop = el.scrollHeight;
-}
+const T = (() => { const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
 
-/* zlib-compatible CRC32 (matches esp_rom_crc32_le(0, ...)) */
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(buf) {
-  let c = 0xFFFFFFFF;
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
-  return (c ^ 0xFFFFFFFF) >>> 0;
-}
+let ctrl, rx = null;
 
-function setConnected(on) {
-  $('state').textContent = on ? `connected: ${device.name}` : 'not connected';
-  $('btnConnect').disabled = on;
-  for (const id of ['btnDisconnect', 'btnStatus', 'btnCapture', 'btnApply', 'led', 'ir', 'auto', 'thr'])
-    $(id).disabled = !on;
-}
-
-function onImage(ev) {
-  const v = ev.target.value;                       // DataView
-  const type = v.getUint8(0);
-  if (type === 1) {                                // START
-    rx = { len: v.getUint32(1, true), w: v.getUint16(5, true), h: v.getUint16(7, true),
-           buf: null, got: 0, seq: 0, t0: performance.now() };
+async function onImage(ev) {
+  const v = ev.target.value, type = v.getUint8(0);
+  if (type === 1) {                                           // START
+    rx = { len: v.getUint32(1, true), w: v.getUint16(5, true), h: v.getUint16(7, true), got: 0, seq: 0, t0: performance.now() };
     rx.buf = new Uint8Array(rx.len);
-  } else if (type === 2 && rx) {                   // DATA
-    const seq = v.getUint16(1, true);
-    if (seq !== rx.seq) { log(`packet loss: expected seq ${rx.seq}, got ${seq}`); rx = null; return; }
-    const chunk = new Uint8Array(v.buffer, v.byteOffset + 3, v.byteLength - 3);
-    rx.buf.set(chunk, rx.got);
-    rx.got += chunk.length;
-    rx.seq++;
-  } else if (type === 3 && rx) {                   // END
-    const want = v.getUint32(1, true);
-    const have = crc32(rx.buf);
+  } else if (type === 2 && rx) {                              // DATA
+    if (v.getUint16(1, true) !== rx.seq) { log('packet loss'); rx = null; return; }
+    const c = new Uint8Array(v.buffer, v.byteOffset + 3, v.byteLength - 3);
+    rx.buf.set(c, rx.got); rx.got += c.length; rx.seq++;
+  } else if (type === 3 && rx) {                              // END
     const ms = performance.now() - rx.t0;
-    const ok = rx.got === rx.len && want === have;
-    $('info').textContent = `${rx.w}x${rx.h}, ${rx.len} bytes, ${ms.toFixed(0)} ms ` +
-      `(${(rx.len / ms).toFixed(1)} kB/s), CRC ${ok ? 'OK' : 'MISMATCH'}`;
+    const ok = rx.got === rx.len && crc32(rx.buf) === v.getUint32(1, true);
+    $('info').textContent = `${rx.w}x${rx.h}, ${rx.len} bytes, ${ms.toFixed(0)} ms, CRC ${ok ? 'OK' : 'MISMATCH'}`;
     log($('info').textContent);
-    if (ok) {
-      const url = URL.createObjectURL(new Blob([rx.buf], { type: 'image/jpeg' }));
-      const old = $('view').src;
-      $('view').src = url;
-      if (old.startsWith('blob:')) URL.revokeObjectURL(old);
-    }
+    if (ok) $('view').src = URL.createObjectURL(new Blob([rx.buf], { type: 'image/jpeg' }));
+    await ctrl.writeValueWithoutResponse(new Uint8Array([ok ? 1 : 2]));   // ACK / NAK
     rx = null;
   }
 }
 
-async function connect() {
-  device = await navigator.bluetooth.requestDevice({
-    filters: [{ services: [SVC] }, { namePrefix: 'DFR1154' }],
-    optionalServices: [SVC],
-  });
-  device.addEventListener('gattserverdisconnected', () => { log('disconnected'); stopPolling(); setConnected(false); });
-  log(`connecting to ${device.name} ...`);
-  const server = await device.gatt.connect();
-  const svc = await server.getPrimaryService(SVC);
-  ctrl   = await svc.getCharacteristic(CTRL);
-  status = await svc.getCharacteristic(STATUS);
-  const img = await svc.getCharacteristic(IMAGE);
-  img.addEventListener('characteristicvaluechanged', onImage);
-  await img.startNotifications();
-  setConnected(true);
-  thrSynced = false;
-  log('ready');
-  readStatus().catch(e => log('error: ' + e));
-  startPolling();
-}
-
-async function send(...bytes) { await ctrl.writeValueWithResponse(new Uint8Array(bytes)); }
-
-let thrSynced = false, pollTimer = null;
-const levelToLux = l => Math.pow(10, l * 4.7 / 100) - 1;
-function showThr(v) {
-  $('thrVal').textContent = v;
-  const lx = levelToLux(+v);
-  $('thrLux').textContent = `(about ${lx < 10 ? lx.toFixed(1) : Math.round(lx)} lux with the light sensor)`;
-}
-
-function applyStatus(text) {
-  const m = k => { const r = text.match(new RegExp('\\b' + k + '=(\\w+)')); return r ? r[1] : null; };
-  const light = m('light'), eff = m('eff'), mode = m('mode'), ir = m('ir'), auto = m('auto'), thr = m('thr');
-  if (light === null) return;
-  $('meter').value = Math.max(0, +light);
-  const src = m('src'), lux = text.match(/lux=(-?[\d.]+)/);
-  $('lightVal').textContent = light +
-    (src === 'als' && lux ? `  (${(+lux[1]).toFixed(1)} lux, light sensor)` :
-     `  (camera exposure${ir === '1' ? ', IR-compensated ' + eff : ''})`);
-  $('mode').textContent = (mode || '-').toUpperCase() + (ir === '1' ? ' / IR ON' : ' / IR OFF');
-  $('raw').textContent = `exp=${m('exp')} gain=${m('gain')}`;
-  $('auto').checked = auto === '1';
-  $('ir').checked = ir === '1';
-  if (!thrSynced && thr !== null) {              // take the device value once per connection
-    $('thr').value = thr; showThr(thr); thrSynced = true;
-  }
-}
-
-async function readStatus(quiet) {
-  const v = await status.readValue();
-  const text = new TextDecoder().decode(v);
-  if (!quiet) log('status: ' + text);
-  applyStatus(text);
-}
-
-function startPolling() {
-  stopPolling();
-  pollTimer = setInterval(() => {
-    if (!status || rx) return;                   // not while an image is arriving
-    readStatus(true).catch(() => {});
-  }, 1500);
-}
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-
-$('btnConnect').onclick = () => connect().catch(e => { log('error: ' + e); setConnected(false); });
-$('btnDisconnect').onclick = () => device && device.gatt.disconnect();
-$('btnStatus').onclick = () => readStatus().catch(e => log('error: ' + e));
-$('btnCapture').onclick = () => send(0x01).catch(e => log('error: ' + e));
-$('btnApply').onclick = async () => {
+$('btn').onclick = async () => {
   try {
-    await send(0x02, +$('size').value);
-    await send(0x03, +$('quality').value);
-    log('settings sent');
+    const dev = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SVC] }, { namePrefix: 'DFR1154' }], optionalServices: [SVC] });
+    dev.addEventListener('gattserverdisconnected', () => log('disconnected'));
+    log('connecting ...');
+    const svc = await (await dev.gatt.connect()).getPrimaryService(SVC);
+    ctrl = await svc.getCharacteristic(CTRL);
+    const img = await svc.getCharacteristic(IMG);
+    img.addEventListener('characteristicvaluechanged', onImage);
+    await img.startNotifications();
+    log('subscribed - waiting for the picture (the OS may ask you to pair)');
   } catch (e) { log('error: ' + e); }
 };
-$('led').onchange = e => send(0x10, e.target.checked ? 1 : 0).catch(err => log('error: ' + err));
-$('ir').onchange  = e => { $('auto').checked = false; send(0x11, e.target.checked ? 1 : 0).catch(err => log('error: ' + err)); };
-$('auto').onchange = e => send(0x12, e.target.checked ? 1 : 0).catch(err => log('error: ' + err));
-$('thr').oninput  = e => showThr(e.target.value);
-$('thr').onchange = e => send(0x13, +e.target.value).then(() => log('night threshold -> ' + e.target.value)).catch(err => log('error: ' + err));
-
-if (!navigator.bluetooth) log('Web Bluetooth not available in this browser - use Chrome or Edge.');
+if (!navigator.bluetooth) log('Web Bluetooth not available - use Chrome or Edge.');
 </script>
 </body>
 </html>

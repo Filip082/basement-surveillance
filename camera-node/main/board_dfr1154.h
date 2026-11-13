@@ -3,8 +3,9 @@
 /*
  * Pin map for the DFRobot DFR1154 "ESP32-S3 AI CAM" (OV3660).
  *
- * Camera pins match the DFRobot CameraWebServer example (cross-checked against
- * two independent write-ups). LED / IR / BOOT come from the DFRobot wiki.
+ * Camera pins match the DFRobot CameraWebServer example and have been verified
+ * against the board schematic (also confirmed there: LED GPIO3, IR_CT GPIO47,
+ * LTR-308 ambient light sensor on the camera's SCCB bus GPIO8/GPIO9).
  *
  * GPIO 35/36/37 are used internally by the octal PSRAM (ESP32-S3R8) and must
  * never be touched.
@@ -34,3 +35,10 @@
 #define BOARD_PIN_LED   3   /* on-board LED (GPIO3 is a strapping pin, fine as output after boot) */
 #define BOARD_PIN_IR    47  /* IR illumination LEDs */
 #define BOARD_PIN_BOOT  0
+
+/* LTR-308ALS-01 ambient light sensor: I2C address 0x53 on the SCCB bus above.
+ * Its open-drain interrupt output is wired to GPIO48 (not used by this demo). */
+#define BOARD_PIN_LTR_INT 48
+
+/* Also on the schematic (not used by this demo): microSD in SPI mode
+ * CS GPIO10, MOSI GPIO11, SCLK GPIO12, MISO GPIO13; native USB GPIO19/GPIO20. */

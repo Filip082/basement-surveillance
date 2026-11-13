@@ -1,60 +1,89 @@
-menu "Camera node demo"
+menu "Camera node"
 
-    config CAMNODE_BLE_DEVICE_NAME
-        string "BLE device name"
-        default "DFR1154-CAM"
+    config NODE_WAKE_GPIO
+        int "Wake-up input GPIO"
+        range 0 21
+        default 10
         help
-            Name advertised over BLE. Keep it short (max ~20 characters).
+            Light-sleep wake-up input. GPIO10 is the SD_CS line of the unused
+            microSD socket on the DFR1154 (keep the socket empty).
 
-    config CAMNODE_XCLK_MHZ
-        int "Camera XCLK frequency (MHz)"
+    config NODE_WAKE_ACTIVE_LOW
+        bool "Wake-up line is active LOW"
+        default n
+        help
+            Off: the event drives the pin HIGH (internal pull-down keeps it low
+            when idle). On: the event pulls the pin LOW (internal pull-up).
+            Wake-up is level triggered: the line must go back to idle before the
+            node can sleep again.
+
+    config NODE_CAMERA_XCLK_MHZ
+        int "Camera XCLK (MHz)"
         range 5 24
         default 10
         help
-            Clock given to the OV3660. 10 MHz is conservative. If frames
-            are corrupt or you see "cam_hal: FB-OVF" you can try lowering it
-            (8 MHz); 20 MHz is the usual value for higher frame rates.
+            10 MHz is known-good on this board. Higher = faster frames = faster
+            capture. If you see "cam_hal: FB-OVF" or garbled frames, lower it.
 
-    config CAMNODE_JPEG_QUALITY
-        int "Initial JPEG quality (4 = best, 63 = smallest)"
-        range 4 63
-        default 12
-
-    config CAMNODE_VFLIP
+    config NODE_CAMERA_VFLIP
         bool "Flip image vertically"
         default y
-        help
-            The OV3660 is often mounted upside down on ESP32-S3 camera boards.
-            Disable if the picture is already upright.
 
-    config CAMNODE_HMIRROR
+    config NODE_CAMERA_HMIRROR
         bool "Mirror image horizontally"
         default n
 
-    config CAMNODE_AUTO_DAYNIGHT
-        bool "Automatic day/night IR control at boot"
+    config NODE_BLE_DEVICE_NAME
+        string "BLE device name"
+        default "DFR1154-CAM"
+
+    config NODE_BLE_CONNECT_TIMEOUT_MS
+        int "Wait for the computer to connect after waking (ms)"
+        range 1000 120000
+        default 10000
+        help
+            Advertising stops and the node goes back to sleep after this time
+            if no paired computer connected and subscribed.
+
+    config NODE_BLE_PAIRING_WINDOW_S
+        int "Pairing window after power-up / BOOT held (seconds)"
+        range 5 600
+        default 60
+        help
+            At power-up with no paired computer (or with BOOT held) the node
+            advertises this long so you can pair it.
+
+    config NODE_BLE_ACK_TIMEOUT_MS
+        int "Wait for the computer's ACK after sending (ms)"
+        range 100 10000
+        default 2000
+        help
+            The receiver confirms a complete frame; the node disconnects right
+            away. A receiver that cannot ACK costs this much extra awake time.
+
+    config NODE_BLE_REQUIRE_ENCRYPTION
+        bool "Only send images over a paired (encrypted) link"
         default y
 
-    config CAMNODE_DAYNIGHT_THRESHOLD
-        int "Night threshold (0 = dark .. 100 = bright)"
-        range 0 100
-        default 40
+    choice NODE_BLE_PAIRING_METHOD
+        prompt "Pairing method"
+        default NODE_BLE_PAIRING_JUST_WORKS
         help
-            IR turns on when the light level drops below this value.
-            Adjustable at runtime from the BLE viewer.
+            Just Works: no PIN, anyone in range who pairs first is accepted.
+            Fixed passkey: the computer must enter the PIN below (protects
+            against strangers, but the bleak-based tools/receiver.py on
+            Windows cannot type PINs - pair via the Windows Bluetooth settings).
 
-    config CAMNODE_DAYNIGHT_HYSTERESIS
-        int "Hysteresis (levels above the threshold before IR turns off)"
-        range 0 50
-        default 10
+        config NODE_BLE_PAIRING_JUST_WORKS
+            bool "Just Works"
+        config NODE_BLE_PAIRING_PASSKEY
+            bool "Fixed passkey"
+    endchoice
 
-    config CAMNODE_IR_COMP
-        int "IR compensation (levels)"
-        range 0 80
-        default 25
-        help
-            With the IR light on the scene looks brighter to the sensor. This
-            amount is subtracted from the measured level while IR is on so the
-            light does not switch itself off again. Raise it if IR flickers.
+    config NODE_BLE_PASSKEY
+        int "Fixed passkey (6 digits)"
+        range 0 999999
+        default 123456
+        depends on NODE_BLE_PAIRING_PASSKEY
 
 endmenu
