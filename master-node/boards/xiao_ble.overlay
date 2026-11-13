@@ -8,8 +8,13 @@
  */
 
 #include <zephyr/dt-bindings/lora/sx126x.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
 
 / {
+	zephyr,user {
+		wake-gpios = <&xiao_d 0 GPIO_ACTIVE_HIGH>;
+	};
+
 	aliases {
 		lora0 = &lora0;
 	};

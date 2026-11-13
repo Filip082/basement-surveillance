@@ -8,7 +8,8 @@
   // West workspace layout inside the container:
   //   /workdir/              named volume (Zephyr + modules, survives rebuilds)
   //   /workdir/master-node/  this folder, bind-mounted from the host
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/master-node,type=bind,z",
+  //"workspaceMount": "source=${localWorkspaceFolder},target=/workdir/master-node,type=bind,z",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/master-node,type=bind",
   "workspaceFolder": "/workdir/master-node",
   "mounts": ["source=master-node-zephyr,target=/workdir,type=volume"],
 
