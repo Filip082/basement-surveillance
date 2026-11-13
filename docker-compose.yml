@@ -53,6 +53,33 @@ services:
     ports:
       - "${FRONTEND_PORT}:${FRONTEND_PORT}"
 
+
+  border-router:
+    profiles:
+      - hardware
+
+    build:
+      context: ./border-router
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    environment:
+      BACKEND_URL: http://backend:${PORT:-8000}
+      BORDER_DB: /data/router-v1.sqlite3
+
+    devices:
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/gpiochip0:/dev/gpiochip0
+
+    volumes:
+      - border-router-data:/data
+
+    depends_on:
+      - backend
+
+
 volumes:
   db-data:
   images:
+  border-router-data:

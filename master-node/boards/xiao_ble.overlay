@@ -15,6 +15,11 @@
 	};
 };
 
+/* D4/D5 are NSS/RF_SW here, so the connector I2C bus must not claim them. */
+&xiao_i2c {
+	status = "disabled";
+};
+
 &xiao_spi {
 	status = "okay";
 	cs-gpios = <&xiao_d 4 GPIO_ACTIVE_LOW>;		/* D4: NSS */

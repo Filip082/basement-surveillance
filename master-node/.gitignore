@@ -1,2 +1,7 @@
 # Zephyr build output
 build/
+
+# Host compatibility tests
+__pycache__/
+*.py[cod]
+.venv/

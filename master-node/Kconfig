@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: Apache-2.0
+mainmenu "Basement surveillance master node"
+
+source "Kconfig.zephyr"
+
+menu "Basement LoRa sender"
+
+config APP_LORA_DEMO
+	bool "Periodically send a test ENTRY message"
+	default y
+	depends on APP_PERSISTENT_IDS
+	help
+	  Temporary demo only. Disable when replacing main with real application logic.
+
+config APP_PERSISTENT_IDS
+	bool "Flash-backed message ID allocator"
+	default y
+	select FLASH
+	select FLASH_MAP
+	select FLASH_PAGE_LAYOUT
+	select NVS
+	select NVS_DATA_CRC
+	help
+	  Reserve IDs in NVS before use so a reset skips unused IDs instead of reusing them.
+
+config APP_DEVICE_ID
+	int "Provisioned node ID (must differ between physical senders)"
+	range 1 65535
+	default 1
+
+config APP_DEMO_INTERVAL_SECONDS
+	int "Sleep after each completed or failed demo session, in seconds"
+	range 1 86400
+	default 60
+
+config APP_LORA_FREQUENCY
+	int "Carrier frequency in Hz (868.0..868.6 MHz profile)"
+	range 868000000 868600000
+	default 868100000
+
+config APP_LORA_BANDWIDTH
+	int "Bandwidth in Hz (125000, 250000 or 500000)"
+	default 125000
+	help
+	  The entire channel must fit inside 868.0..868.6 MHz. Invalid bandwidths fail compilation.
+
+config APP_LORA_SF
+	int "Spreading factor (must match border router)"
+	range 7 12
+	default 7
+
+config APP_LORA_TX_POWER
+	int "Nominal transmitter power in dBm"
+	range -9 14
+	default 14
+	help
+	  Conservative power range; antenna gain and losses still determine radiated ERP.
+
+config APP_LORA_DUTY_PERMILLE
+	int "Sender TX duty fraction in parts per thousand (10 = 1%)"
+	range 1 10
+	default 10
+	help
+	  Applies to every DATA, END and retransmission, including failed TX attempts.
+
+config APP_ROUTER_DUTY_PERMILLE
+	int "Router TX duty fraction used to size the receive window"
+	range 1 10
+	default 10
+	help
+	  Must be no greater than the actual router fraction, otherwise deadlines can be too short.
+
+config APP_ROUTER_QUIET_MS
+	int "Router receive quiet period in milliseconds"
+	range 0 60000
+	default 350
+
+config APP_LORA_FEEDBACK_TIMEOUT_MS
+	int "Minimum feedback receive window, milliseconds"
+	range 1000 3600000
+	default 20000
+	help
+	  The actual window is increased if the maximum NACK airtime, router duty spacing
+	  and quiet period require longer. Each retry listens continuously for this window.
+
+config APP_LORA_END_ATTEMPTS
+	int "Maximum END/feedback rounds per message"
+	range 1 512
+	default 8
+
+config APP_LORA_PACKET_ATTEMPTS
+	int "Maximum TX attempts after an I/O error for each DATA or END packet"
+	range 1 8
+	default 2
+
+endmenu

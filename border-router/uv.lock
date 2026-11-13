@@ -1,0 +1,56 @@
+version = 1
+revision = 3
+requires-python = "==3.15.*"
+
+[manifest]
+excludes = ["rpi-gpio"]
+
+[[package]]
+name = "basement-border-router"
+version = "1"
+source = { editable = "." }
+
+[package.optional-dependencies]
+radio = [
+    { name = "gpiod" },
+    { name = "lorarf" },
+    { name = "spidev" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gpiod", marker = "extra == 'radio'", specifier = ">=2.0,<3" },
+    { name = "lorarf", marker = "extra == 'radio'", git = "https://github.com/chandrawi/LoRaRF-Python.git?rev=39c664476dc447f50b8f5c1f1c9d77f3fea21140" },
+    { name = "spidev", marker = "extra == 'radio'", specifier = ">=3.6" },
+]
+provides-extras = ["radio"]
+
+[[package]]
+name = "gpiod"
+version = "2.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/09/caeafe129570269e85f93f429ac5eb7e15c513b2b788996ee68c640c3fd6/gpiod-2.6.0.tar.gz", hash = "sha256:1076f0384c63fdb9e4438508c511378c57b4236c6b43b65ad609d0dafdfcfd7d", size = 75806, upload-time = "2026-11-04T09:21:54.776Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/c1/ee5f6b1a03bdce3439834ad8756723b9edf219c23b99b56d33d192cb1e1a/gpiod-2.6.0-cp315-cp315-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7dce4198abbbbff0d16ac436e28e914e385ee11d9617b3977747e581d517f321", size = 115627, upload-time = "2026-11-04T09:21:43.456Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/76/0cbe8a69082942b078f9cdf00f0e4542acea8afb003cb92ad33cb53b5055/gpiod-2.6.0-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:ff1a956b840bbeb4cfa588ba1b04b984c9cd2d4d1eeccef8bd8bed4ebc91a6cb", size = 114906, upload-time = "2026-11-04T09:21:44.99Z" },
+    { url = "https://files.pythonhosted.org/packages/06/35/3175b2f0937ea0763807529dce42c54dd88c2d13b9a508137a59278155d5/gpiod-2.6.0-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:26c10386a07af58fc0d6876c8514fbd8d6eacdb879a3e0b37f0ba185d3128d39", size = 114073, upload-time = "2026-11-04T09:21:46.652Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/5c/a7a2c3cc388b2308f197696d721cd983379d0e024987694a3497870e87b0/gpiod-2.6.0-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:86be2105b300fa0a89903d2dd7dd8467a9adbd3da4e3f711129bad7e7bf851d6", size = 113520, upload-time = "2026-11-04T09:21:47.961Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/cf/a1dd417012daf77c06c4303258d9c5c818a8a4eaceb765e0d4d4c43bec9c/gpiod-2.6.0-cp315-cp315t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dd0bd6ad024786aa6eaa3741a9febe6dae89f46aa695dbde80ed85b4dd4337bf", size = 122067, upload-time = "2026-11-04T09:21:49.196Z" },
+    { url = "https://files.pythonhosted.org/packages/47/52/58cad1b38d6ffb26c5ed3c7c408be0d638f6a8c47f130e2e653c9157f20a/gpiod-2.6.0-cp315-cp315t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e0f537768def5491c10cff267f49aca46245d38aaee21da6a346a1bae9e97161", size = 119444, upload-time = "2026-11-04T09:21:50.521Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/c6/285942790c9b785dd2d0b04e67d1125be7cf0fa3a265ae750abe111c1242/gpiod-2.6.0-cp315-cp315t-musllinux_1_2_aarch64.whl", hash = "sha256:0ad21da92b2715c643af2bb5785a5e3730f748c082a9328becfb6ba6bfb371cb", size = 120101, upload-time = "2026-11-04T09:21:52.013Z" },
+    { url = "https://files.pythonhosted.org/packages/30/8a/3e8511f334f3d4406b053b430ac7b467a2154c668084e29efc0c4cb3874f/gpiod-2.6.0-cp315-cp315t-musllinux_1_2_x86_64.whl", hash = "sha256:ee1e29877ba8a214cdb36e3c05eb4b656ec775f36bf4c657f4aae728ff4513b2", size = 118177, upload-time = "2026-11-04T09:21:53.597Z" },
+]
+
+[[package]]
+name = "lorarf"
+version = "1.4.0"
+source = { git = "https://github.com/chandrawi/LoRaRF-Python.git?rev=39c664476dc447f50b8f5c1f1c9d77f3fea21140#39c664476dc447f50b8f5c1f1c9d77f3fea21140" }
+dependencies = [
+    { name = "spidev" },
+]
+
+[[package]]
+name = "spidev"
+version = "3.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/67/87/039b6eeea781598015b538691bc174cc0bf77df9d4d2d3b8bf9245c0de8c/spidev-3.8.tar.gz", hash = "sha256:2bc02fb8c6312d519ebf1f4331067427c0921d3f77b8bcaf05189a2e8b8382c0", size = 13893, upload-time = "2025-09-15T18:56:20.672Z" }

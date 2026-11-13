@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3*
+*.db
+*.db-shm
+*.db-wal
+dev_received/
+dist/
+.ruff_cache/
+.pytest_cache/

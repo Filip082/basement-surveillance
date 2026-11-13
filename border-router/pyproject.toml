@@ -1,0 +1,35 @@
+[project]
+name = "basement-border-router"
+version = "1"
+description = "Raspberry Pi 4B SX1262 border router: whole-message ACK/NACK and local HTTP"
+readme = "README.md"
+requires-python = ">=3.15,<3.16"
+dependencies = []
+
+[project.optional-dependencies]
+radio = [
+  "gpiod>=2.0,<3",
+  "spidev>=3.6",
+  "LoRaRF @ git+https://github.com/chandrawi/LoRaRF-Python.git@39c664476dc447f50b8f5c1f1c9d77f3fea21140",
+]
+
+[project.scripts]
+bs-border-router = "src.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.ruff]
+target-version = "py315"
+line-length = 100
+
+[tool.uv]
+# The pinned source uses gpiod v2 but still declares the obsolete RPi.GPIO.
+exclude-dependencies = ["RPi.GPIO"]
