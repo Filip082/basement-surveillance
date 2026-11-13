@@ -4,7 +4,7 @@
     "dockerfile": "Dockerfile"
   },
   "remoteUser": "dev",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,z",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
   "workspaceFolder": "/workspace",
 
   // Serial access for flashing from inside the container (Linux hosts).

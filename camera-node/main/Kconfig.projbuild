@@ -1,0 +1,60 @@
+menu "Camera node demo"
+
+    config CAMNODE_BLE_DEVICE_NAME
+        string "BLE device name"
+        default "DFR1154-CAM"
+        help
+            Name advertised over BLE. Keep it short (max ~20 characters).
+
+    config CAMNODE_XCLK_MHZ
+        int "Camera XCLK frequency (MHz)"
+        range 5 24
+        default 10
+        help
+            Clock given to the OV3660. 10 MHz is conservative. If frames
+            are corrupt or you see "cam_hal: FB-OVF" you can try lowering it
+            (8 MHz); 20 MHz is the usual value for higher frame rates.
+
+    config CAMNODE_JPEG_QUALITY
+        int "Initial JPEG quality (4 = best, 63 = smallest)"
+        range 4 63
+        default 12
+
+    config CAMNODE_VFLIP
+        bool "Flip image vertically"
+        default y
+        help
+            The OV3660 is often mounted upside down on ESP32-S3 camera boards.
+            Disable if the picture is already upright.
+
+    config CAMNODE_HMIRROR
+        bool "Mirror image horizontally"
+        default n
+
+    config CAMNODE_AUTO_DAYNIGHT
+        bool "Automatic day/night IR control at boot"
+        default y
+
+    config CAMNODE_DAYNIGHT_THRESHOLD
+        int "Night threshold (0 = dark .. 100 = bright)"
+        range 0 100
+        default 40
+        help
+            IR turns on when the light level drops below this value.
+            Adjustable at runtime from the BLE viewer.
+
+    config CAMNODE_DAYNIGHT_HYSTERESIS
+        int "Hysteresis (levels above the threshold before IR turns off)"
+        range 0 50
+        default 10
+
+    config CAMNODE_IR_COMP
+        int "IR compensation (levels)"
+        range 0 80
+        default 25
+        help
+            With the IR light on the scene looks brighter to the sensor. This
+            amount is subtracted from the measured level while IR is on so the
+            light does not switch itself off again. Raise it if IR flickers.
+
+endmenu
