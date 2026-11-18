@@ -70,3 +70,12 @@ bool board_boot_button_held(unsigned window_ms, unsigned hold_ms)
     }
     return false;
 }
+
+void board_led_blink(unsigned ms)
+{
+    gpio_reset_pin(BOARD_PIN_LED);
+    gpio_set_direction(BOARD_PIN_LED, GPIO_MODE_OUTPUT);
+    gpio_set_level(BOARD_PIN_LED, 1);
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    gpio_set_level(BOARD_PIN_LED, 0);
+}

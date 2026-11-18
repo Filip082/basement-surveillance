@@ -40,5 +40,9 @@
  * Its open-drain interrupt output is wired to GPIO48 (not used by this demo). */
 #define BOARD_PIN_LTR_INT 48
 
+/* Wake-up input: GPIO10 (the unused SD_CS line). Deliberately NOT defined here:
+ * it is configurable in menuconfig -> "Camera node" -> NODE_WAKE_GPIO (default 10,
+ * polarity NODE_WAKE_ACTIVE_LOW) and used in power.c as CONFIG_NODE_WAKE_GPIO. */
+
 /* Also on the schematic (not used by this demo): microSD in SPI mode
  * CS GPIO10, MOSI GPIO11, SCLK GPIO12, MISO GPIO13; native USB GPIO19/GPIO20. */

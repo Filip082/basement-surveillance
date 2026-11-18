@@ -2,10 +2,14 @@
 
 #include <stdio.h>
 #include "driver/gpio.h"
+#include "esp_err.h"
 #include "esp_rom_serial_output.h"
 #include "esp_bit_defs.h"
 #include "esp_sleep.h"
 #include "sdkconfig.h"
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "board_io.h"
 #include "node_log.h"
@@ -35,9 +39,10 @@ void power_wake_gpio_init(void)
     gpio_reset_pin(PIN);
     gpio_set_direction(PIN, GPIO_MODE_INPUT);
     gpio_set_pull_mode(PIN, PULL_MODE);
-    /* keep the same pull while the chip is in light sleep */
-    gpio_sleep_set_direction(PIN, GPIO_MODE_INPUT);
-    gpio_sleep_set_pull_mode(PIN, PULL_MODE);
+    /* Use the normal pad configuration (incl. the pull) during light sleep.
+     * gpio_sleep_set_*() only takes effect with sleep_sel enabled and was a
+     * suspect for a missing wake-up: keep it simple and disable it. */
+    gpio_sleep_sel_dis(PIN);
     NLOGI("power", "wake input GPIO%d, active %s, internal pull-%s",
           CONFIG_NODE_WAKE_GPIO, ACTIVE_LEVEL ? "HIGH" : "LOW", ACTIVE_LEVEL ? "down" : "up");
 }
@@ -53,19 +58,39 @@ bool power_sleep_until_event(void)
      * (e.g. a PIR holding its output) we would wake again immediately. Wait for
      * it to be released, polling with short timer sleeps to stay low power. */
     bool warned = false;
+    bool timer_used = false;
     while (power_wake_pin_active()) {
         if (!warned) {
             NLOGW("power", "wake line still active - waiting for it to be released");
             warned = true;
         }
+#ifdef CONFIG_NODE_DEBUG_POLL_INSTEAD_OF_SLEEP
+        vTaskDelay(pdMS_TO_TICKS(20));
+#else
         esp_sleep_enable_timer_wakeup(200 * 1000);
+        timer_used = true;
         flush_console();
         esp_light_sleep_start();
+#endif
     }
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+    if (timer_used) {
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+    }
 
-    gpio_wakeup_enable(PIN, WAKE_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
+#ifdef CONFIG_NODE_DEBUG_POLL_INSTEAD_OF_SLEEP
+    /* Bench mode: no sleep, so the USB serial console stays alive. */
+    NLOGW("power", "DEBUG poll mode (no sleep): waiting for GPIO%d to go %s",
+          CONFIG_NODE_WAKE_GPIO, ACTIVE_LEVEL ? "HIGH" : "LOW");
+    while (!power_wake_pin_active()) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    NLOGI("power", "wake line active");
+    return true;
+#endif
+
+    gpio_intr_disable(PIN);               /* the sleep logic owns the pin's interrupt */
+    ESP_ERROR_CHECK(gpio_wakeup_enable(PIN, WAKE_LEVEL));
+    ESP_ERROR_CHECK(esp_sleep_enable_gpio_wakeup());
     board_prepare_sleep();
 
     NLOGI("power", "entering light sleep, waiting for GPIO%d", CONFIG_NODE_WAKE_GPIO);
@@ -75,6 +100,9 @@ bool power_sleep_until_event(void)
 
     board_resume();
     gpio_wakeup_disable(PIN);
+#ifdef CONFIG_NODE_WAKE_LED_BLINK
+    board_led_blink(60);                  /* visible proof of a wake-up: USB serial is dead in sleep */
+#endif
 
     if (err == ESP_OK) {
         uint32_t causes = esp_sleep_get_wakeup_causes();   /* bit mask: BIT(cause) */

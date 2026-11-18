@@ -19,3 +19,6 @@ void board_resume(void);
  * reset, then press and hold BOOT during the window that follows.)
  */
 bool board_boot_button_held(unsigned window_ms, unsigned hold_ms);
+
+/* Pulse the on-board LED (GPIO3) once, blocking for ms. Debug aid for sleep wake-ups. */
+void board_led_blink(unsigned ms);

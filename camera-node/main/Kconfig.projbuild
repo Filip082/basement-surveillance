@@ -8,6 +8,30 @@ menu "Camera node"
             Light-sleep wake-up input. GPIO10 is the SD_CS line of the unused
             microSD socket on the DFR1154 (keep the socket empty).
 
+    config NODE_DEBUG_POLL_INSTEAD_OF_SLEEP
+        bool "Bench debugging: poll the wake pin instead of sleeping"
+        default n
+        help
+            Light sleep switches the USB serial/JTAG port off, so the serial
+            monitor disconnects (and the monitor's reconnect resets the chip).
+            Enable this to test the whole cycle with live logs; the node then
+            waits for the wake pin by polling (high power). Disable for real use.
+
+    config NODE_WAKE_LED_BLINK
+        bool "Blink the on-board LED (GPIO3) for 60 ms after every light-sleep wake-up"
+        default y
+        help
+            The USB serial port is off during light sleep, so this is the way to see
+            that the wake-up happened. Disable it for the final battery build.
+
+    config NODE_DEBUG_LED_STEPS
+        bool "Debug: show cycle progress on the LED (needs LOGS_ENABLED)"
+        default y
+        help
+            After each cycle step 6..13 the LED blinks (step-5) times, and one long
+            blink at step 14 (back to sleep). Where the blinking stops is where the
+            node got stuck. Adds ~10 s per cycle: disable for real use.
+
     config NODE_WAKE_ACTIVE_LOW
         bool "Wake-up line is active LOW"
         default n
