@@ -1,0 +1,5 @@
+west:
+  command: /opt/venv/bin/west build -b xiao_ble -S cdm-acm-console -d build_ble -p
+    always
+  topdir: /workdir
+  version: 1.5.0

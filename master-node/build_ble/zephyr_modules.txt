@@ -1,0 +1,3 @@
+"cmsis_6":"/workdir/modules/hal/cmsis_6":"${ZEPHYR_CMSIS_6_CMAKE_DIR}"
+"hal_nordic":"/workdir/modules/hal/nordic":"${ZEPHYR_HAL_NORDIC_CMAKE_DIR}"
+"loramac-node":"/workdir/modules/lib/loramac-node":"${ZEPHYR_LORAMAC_NODE_CMAKE_DIR}"
