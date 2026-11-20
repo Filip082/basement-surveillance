@@ -1,14 +1,32 @@
 
 import { useEffect, useState } from 'react'
 import './App.css'
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip
+} from 'recharts'
 
 function App() {
   const [images, setImages] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [selectedImage, setSelectedImage] = useState(null)
-  const [battery, setBattery] = useState(null)
+  const [batteries, setBatteries] = useState({})
   const [batteryError, setBatteryError] = useState(null)
+  const [showBatteryDetails, setShowBatteryDetails] = useState(false)
+  const [batteryHistory, setBatteryHistory] = useState({})
+  const [historyDays, setHistoryDays] = useState(7)
+  const [historyError, setHistoryError] = useState(null)
+  const [storage, setStorage] = useState(null)
+  const [storageError, setStorageError] = useState(null)
+  const [newStorageLimit, setNewStorageLimit] = useState(16)
+  const [showStorageConfirm, setShowStorageConfirm] = useState(false)
+  const [storageSaving, setStorageSaving] = useState(false)
 
   const [viewMode, setViewMode] = useState('list')
   const [pageSize, setPageSize] = useState(10)
@@ -52,6 +70,61 @@ function App() {
     window.removeEventListener('keydown', handleKeyDown)
   }
 }, [selectedImage, selectedImageIndex])
+
+  useEffect(() => {
+    async function fetchStorage() {
+      try {
+        const response = await fetch('/api/storage')
+
+        if (!response.ok) {
+          throw new Error('Nie udało się pobrać informacji o pamięci')
+        }
+
+        const data = await response.json()
+        setStorage(data)
+        setNewStorageLimit(data.limitGB)
+        setStorageError(null)
+      } catch (error) {
+        console.error('Storage loading failed:', error)
+        setStorageError(error.message)
+      }
+    }
+
+    fetchStorage()
+  }, [])
+
+    async function saveStorageLimit() {
+    setStorageSaving(true)
+
+    try {
+      const response = await fetch('/api/storage/limit', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ limitGB: newStorageLimit })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Nie udało się zmienić limitu')
+      }
+
+      setStorage({
+        ...data,
+        sizeGB: Number((data.sizeBytes / (1024 ** 3)).toFixed(3))
+      })
+      setStorageError(null)
+      setShowStorageConfirm(false)
+    } catch (error) {
+      console.error('Storage limit update failed:', error)
+      setStorageError(error.message)
+      setShowStorageConfirm(false)
+    } finally {
+      setStorageSaving(false)
+    }
+  }
   useEffect(() => {
     async function fetchImages() {
       try {
@@ -86,7 +159,7 @@ function App() {
         }
 
         const data = await response.json()
-        setBattery(data.battery)
+        setBatteries(data.battery || {})
         setBatteryError(null)
 
       } catch (error) {
@@ -98,6 +171,32 @@ function App() {
     fetchBattery()
 
   }, [])
+
+  useEffect(() => {
+  if (!showBatteryDetails) return
+
+  async function fetchBatteryHistory() {
+    try {
+      const response = await fetch(
+        `/api/telemetry/history?days=${historyDays}`
+      )
+
+      if (!response.ok) {
+        throw new Error('Nie udało się pobrać historii baterii')
+      }
+
+      const data = await response.json()
+
+      setBatteryHistory(data.history || {})
+      setHistoryError(null)
+    } catch (error) {
+      console.error('Battery history loading failed:', error)
+      setHistoryError(error.message)
+    }
+  }
+
+  fetchBatteryHistory()
+}, [showBatteryDetails, historyDays])
 
   const totalPages = Math.ceil(images.length / pageSize)
 
@@ -116,42 +215,230 @@ function App() {
 
   return (
     <main>
-    <div className="dashboard-header">
-      <h1>System kontroli bezpieczeństwa</h1>
-        <section className="dashboard-status">
-          <div className="battery-card">
-            <div className="battery-header">
-              <span>Stan baterii</span>
-              <span className="battery-icon">🔋</span>
+    <div className="dashboard-top">
+      <div className="dashboard-header">
+        <h1>System kontroli bezpieczeństwa</h1>
+      </div>
+            <section className="storage-section">
+        <h2>Pamięć zdjęć</h2>
+
+        {storageError ? (
+          <p className="storage-error">Błąd odczytu pamięci</p>
+        ) : storage === null ? (
+          <p>Ładowanie informacji o pamięci...</p>
+        ) : (
+          <>
+            <p>
+              Zajętość: {storage.sizeGB} GB z {storage.limitGB} GB
+            </p>
+
+            <div className="storage-progress">
+              <div
+                className="storage-progress-fill"
+                style={{
+                  width: `${Math.min(storage.usagePercent, 100)}%`
+                }}
+              />
             </div>
 
-            {batteryError ? (
-              <p className="battery-error">Błąd pobierania baterii</p>
-            ) : battery === null ? (
-              <p>Brak danych</p>
-            ) : (
-              <>
-                <div className="battery-value">{battery}%</div>
+            <p>{storage.usagePercent}% wykorzystanego miejsca</p>
+            <div className="storage-controls">
+              <label htmlFor="storageLimit">Limit:</label>
 
-                <div className="battery-bar">
-                  <div
-                    className={`battery-fill ${
-                      battery <= 20
-                        ? 'low'
-                        : battery <= 59
-                          ? 'medium'
-                          : 'high'
-                    }`}
-                    style={{ width: `${battery}%` }}
-                  />
-                </div>
-              </>
-            )}
+              <select
+                id="storageLimit"
+                value={newStorageLimit}
+                onChange={(event) => setNewStorageLimit(Number(event.target.value))}
+              >
+                {Array.from({ length: 16 }, (_, index) => index + 1).map((value) => (
+                  <option key={value} value={value}>
+                    {value} GB
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setShowStorageConfirm(true)}
+                disabled={newStorageLimit === storage.limitGB}
+              >
+                Zmień limit
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section
+        className="devices-section"
+        onClick={() => setShowBatteryDetails(true)}
+      >
+        <h2>Stan urządzeń</h2>
+
+        {batteryError ? (
+          <p className="battery-error">Błąd odczytu</p>
+        ) : Object.keys(batteries).length === 0 ? (
+          <p>Brak urządzeń</p>
+        ) : (
+          <div className="devices-grid">
+            {Object.entries(batteries).map(([id, battery]) => (
+              <div
+                  className={`battery-card ${
+                    battery > 50 ? 'battery-high' :
+                    battery >= 25 ? 'battery-medium' :
+                    'battery-low'
+                  }`}
+                  key={id}
+                >
+                <span className="device-name">{id}</span>
+                <span className="battery-icon">🔋</span>
+                <span className="battery-value">{battery}%</span>
+              </div>
+            ))}
           </div>
-        </section>
-      </div>
+        )}
 
+        <p className="devices-hint">
+          Kliknij, aby zobaczyć historię
+        </p>
+      </section>
+    </div>
+      
+      {showBatteryDetails && (
+        <div
+          className="battery-modal"
+          onClick={() => setShowBatteryDetails(false)}
+        >
+          <section
+            className="battery-modal-content"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="battery-modal-close"
+              onClick={() => setShowBatteryDetails(false)}
+            >
+              &times;
+            </button>
 
+            <h2>Historia baterii urządzeń</h2>
+
+            <div className="history-controls">
+              <label htmlFor="historyDays">Zakres historii:</label>
+
+              <select
+                id="historyDays"
+                value={historyDays}
+                onChange={(event) => setHistoryDays(Number(event.target.value))}
+              >
+                <option value={7}>7 dni</option>
+                <option value={14}>14 dni</option>
+                <option value={30}>30 dni</option>
+              </select>
+            </div>
+
+            {historyError && (
+              <p className="battery-error">{historyError}</p>
+            )}
+
+            {Object.entries(batteries).map(([id, battery]) => {
+              const chartData = (batteryHistory[id] || []).map((entry) => ({
+                battery: entry.battery,
+                timestamp: new Date(entry.received_at).getTime()
+              }))
+
+              return (
+                <div className="battery-detail-card" key={id}>
+                  <h3>{id}</h3>
+                  <p>Aktualny poziom baterii: {battery}%</p>
+
+                  {chartData.length === 0 ? (
+                    <p>Brak pomiarów w wybranym okresie.</p>
+                  ) : (
+                    <div className="battery-chart">
+                      <ResponsiveContainer width="100%" height={280}>
+                        <LineChart data={chartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis
+                            dataKey="timestamp"
+                            type="number"
+                            scale="time"
+                            domain={['dataMin', 'dataMax']}
+                            tickFormatter={(value) =>
+                              new Date(value).toLocaleString('pl-PL')
+                            }
+                          />
+                          <YAxis domain={[0, 100]} unit="%" />
+                          <Tooltip
+                            labelFormatter={(value) =>
+                              new Date(value).toLocaleString('pl-PL')
+                            }
+                            formatter={(value) => [`${value}%`, 'Bateria']}
+                          />
+                          <Line
+                            type="linear"
+                            dataKey="battery"
+                            stroke="#16a34a"
+                            strokeWidth={2}
+                            dot={{ r: 4 }}
+                            activeDot={{ r: 6 }}
+                            connectNulls={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </section>
+        </div>
+      )}
+      {showStorageConfirm && (
+        <div
+          className="storage-modal"
+          onClick={() => {
+            if (!storageSaving) setShowStorageConfirm(false)
+          }}
+        >
+          <section
+            className="storage-modal-content"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>Potwierdzenie zmiany limitu</h2>
+
+            <p>
+              Czy na pewno chcesz zmienić limit pamięci z {storage.limitGB} GB
+              na {newStorageLimit} GB?
+            </p>
+
+            {newStorageLimit < storage.limitGB && (
+              <p className="storage-warning">
+                Uwaga! Zmniejszenie limitu może spowodować automatyczne
+                usunięcie najstarszych zdjęć wraz z ich wpisami w bazie danych.
+              </p>
+            )}
+
+            <div className="storage-modal-actions">
+              <button
+                type="button"
+                onClick={() => setShowStorageConfirm(false)}
+                disabled={storageSaving}
+              >
+                Anuluj
+              </button>
+
+              <button
+                type="button"
+                onClick={saveStorageLimit}
+                disabled={storageSaving}
+              >
+                {storageSaving ? 'Zapisywanie...' : 'Potwierdź zmianę'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       <div className="gallery-toolbar">
         <div className="view-controls">
           <button
