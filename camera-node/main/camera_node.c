@@ -16,7 +16,10 @@
  * See README.md for the details of every module.
  */
 
+#include <stdlib.h>
+#include <string.h>
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +30,7 @@
 #include "ble_link.h"
 #include "board_io.h"
 #include "camera_service.h"
+#include "face_detect.h"
 #include "node_config.h"
 #include "node_log.h"
 #include "power.h"
@@ -50,6 +54,110 @@ static bool is_dark(const node_config_t *cfg)
     return dark;
 }
 
+/* The picture that goes out over BLE, and what has to be released afterwards. */
+typedef struct {
+    const uint8_t *buf;
+    size_t len;
+    uint16_t width, height;
+    uint8_t flags;          /* BLE_IMG_FLAG_* */
+    uint8_t faces;
+    camera_fb_t *fb;        /* camera frame to give back (or NULL) */
+    uint8_t *owned;         /* malloc'ed buffer to free (picture with frames), or NULL */
+} out_image_t;
+
+static void out_release(out_image_t *o)
+{
+    if (o->fb) {
+        camsvc_release(o->fb);
+    }
+    free(o->owned);
+    memset(o, 0, sizeof(*o));
+}
+
+static void out_from_fb(out_image_t *o, camera_fb_t *fb)
+{
+    o->buf = fb->buf;
+    o->len = fb->len;
+    o->width = fb->width;
+    o->height = fb->height;
+    o->fb = fb;
+}
+
+/* Steps 9a-9c: take ONE picture, no face search. */
+static bool capture_single(bool dark, out_image_t *out)
+{
+    camera_fb_t *fb = camsvc_capture(dark ? NODE_SETTLE_FRAMES_NIGHT : NODE_SETTLE_FRAMES_DAY);
+    if (!fb) {
+        NSTEP(9, "capture FAILED");
+        return false;
+    }
+    NSTEP(9, "frame captured: %ux%u, %u bytes", (unsigned)fb->width, (unsigned)fb->height,
+          (unsigned)fb->len);
+    out_from_fb(out, fb);
+    return true;
+}
+
+#ifdef CONFIG_NODE_FACE_DETECT
+/*
+ * Steps 9a-9c with face search: take a picture, look for a face. Face found -> draw
+ * the frame and return that picture. No face -> wait until
+ * NODE_FACE_RETRY_INTERVAL_MS after the start of the last shot and try again, until
+ * NODE_FACE_WINDOW_MS have passed since the wake-up; the last picture is then returned
+ * without a face note.
+ */
+static bool capture_face_aware(bool dark, int64_t t_wake_us, out_image_t *out)
+{
+    for (int shot = 1;; shot++) {
+        int64_t t_shot_us = esp_timer_get_time();
+        camera_fb_t *fb = camsvc_capture(shot == 1 ? (dark ? NODE_SETTLE_FRAMES_NIGHT
+                                                           : NODE_SETTLE_FRAMES_DAY)
+                                                   : CONFIG_NODE_FACE_RETRY_SETTLE_FRAMES);
+        if (!fb) {
+            NSTEP(9, "shot %d: capture FAILED", shot);
+            return false;
+        }
+
+        face_result_t fr;
+        esp_err_t err = face_detect_run(fb->buf, fb->len, true, &fr);
+        int64_t now_us = esp_timer_get_time();
+        NSTEP(9, "shot %d: %ux%u, %u bytes, %d face(s) (detection %lld ms, %lld ms since wake-up)",
+              shot, (unsigned)fb->width, (unsigned)fb->height, (unsigned)fb->len,
+              err == ESP_OK ? fr.faces : -1, (long long)((now_us - t_shot_us) / 1000),
+              (long long)((now_us - t_wake_us) / 1000));
+
+        if (err != ESP_OK) {                         /* detector broken: send the picture as is */
+            out_from_fb(out, fb);
+            return true;
+        }
+        if (fr.faces > 0) {
+            out_from_fb(out, fb);
+            out->flags = BLE_IMG_FLAG_FACE;
+            out->faces = (uint8_t)(fr.faces > 255 ? 255 : fr.faces);
+            if (fr.jpeg) {                           /* use the picture with the frames */
+                camsvc_release(fb);
+                out->fb = NULL;
+                out->owned = fr.jpeg;
+                out->buf = fr.jpeg;
+                out->len = fr.jpeg_len;
+            }
+            return true;
+        }
+        if ((now_us - t_wake_us) / 1000 >= CONFIG_NODE_FACE_WINDOW_MS) {
+            NSTEP(9, "no face within %d ms - sending the last picture", CONFIG_NODE_FACE_WINDOW_MS);
+            out_from_fb(out, fb);
+            return true;
+        }
+
+        camsvc_release(fb);
+        int64_t wait_us = t_shot_us + (int64_t)CONFIG_NODE_FACE_RETRY_INTERVAL_MS * 1000
+                          - esp_timer_get_time();
+        if (wait_us > 0) {
+            vTaskDelay(pdMS_TO_TICKS((wait_us + 999) / 1000));
+        }
+    }
+}
+#endif
+
 /*
  * One complete event cycle (steps 6-13). pairing_window = true is used right after
  * power-up when no computer is paired yet: it waits longer for a computer to appear.
@@ -58,6 +166,7 @@ static void run_cycle(bool pairing_window)
 {
     const node_config_t *cfg = node_config_get();
     node_log_cycle_start();
+    const int64_t t_wake_us = esp_timer_get_time();
     NSTEP(6, "event detected%s", pairing_window ? " (pairing cycle after power-up)" : "");
 
     /* Wake the camera and the light sensor together; the sensor needs ~30 ms anyway. */
@@ -75,24 +184,23 @@ static void run_cycle(bool pairing_window)
         NSTEP(8, "bright enough -> IR LEDs stay off");
     }
 
-    camera_fb_t *fb = camsvc_capture(dark ? NODE_SETTLE_FRAMES_NIGHT
-                                          : NODE_SETTLE_FRAMES_DAY); /* 9 */
-    if (fb) {
-        NSTEP(9, "frame captured: %ux%u, %u bytes", (unsigned)fb->width,
-              (unsigned)fb->height, (unsigned)fb->len);
-    } else {
-        NSTEP(9, "capture FAILED");
-    }
+    out_image_t out = {0};                                          /* 9 */
+#ifdef CONFIG_NODE_FACE_DETECT
+    bool have = capture_face_aware(dark, t_wake_us, &out);
+#else
+    (void)t_wake_us;
+    bool have = capture_single(dark, &out);
+#endif
 
     board_ir_set(false);                                            /* 10 */
     NSTEP(10, "IR LEDs OFF");
 
     /* Camera and light sensor are not needed any more: power them down before the
-     * (long, radio-heavy) BLE part. The captured frame stays in PSRAM. */
+     * (long, radio-heavy) BLE part. The picture stays in PSRAM. */
     camsvc_standby();
     als_standby();
 
-    if (fb) {
+    if (have) {
         uint32_t wait_ms = pairing_window ? CONFIG_NODE_BLE_PAIRING_WINDOW_S * 1000u
                                           : CONFIG_NODE_BLE_CONNECT_TIMEOUT_MS;
         if (ble_link_start(true) == ESP_OK) {                       /* 11 */
@@ -103,11 +211,13 @@ static void run_cycle(bool pairing_window)
                 NSTEP(11, "computer connected, paired and listening");
 
                 for (int attempt = 1; attempt <= 2; attempt++) {    /* 12 */
-                    if (ble_link_send_image(fb->buf, fb->len, fb->width, fb->height) != ESP_OK) {
+                    if (ble_link_send_image(out.buf, out.len, out.width, out.height,
+                                            out.flags, out.faces) != ESP_OK) {
                         NSTEP(12, "sending FAILED (attempt %d)", attempt);
                         break;
                     }
-                    NSTEP(12, "frame sent (attempt %d), waiting for ACK", attempt);
+                    NSTEP(12, "frame sent (attempt %d, %s), waiting for ACK", attempt,
+                          (out.flags & BLE_IMG_FLAG_FACE) ? "FACE DETECTED" : "no face");
                     ble_ack_t ack = ble_link_wait_ack(CONFIG_NODE_BLE_ACK_TIMEOUT_MS);
                     if (ack == BLE_ACK_OK) {
                         NSTEP(12, "ACK received - delivered");
@@ -127,7 +237,7 @@ static void run_cycle(bool pairing_window)
             NSTEP(11, "BLE failed to start -> frame dropped");
         }
         ble_link_stop();
-        camsvc_release(fb);
+        out_release(&out);
     }
 
     NSTEP(13, "BLE off, IR off, camera + light sensor in standby");
@@ -172,6 +282,12 @@ void app_main(void)
     /* 2: camera (stays initialised, parked in standby) */
     err = camsvc_init(cfg);
     NSTEP(2, "camera %s", err == ESP_OK ? "started and in standby" : "FAILED to start (will retry on capture)");
+
+#ifdef CONFIG_NODE_FACE_DETECT
+    /* face detection model (loaded once; ~1.5 MB read from flash) */
+    err = face_detect_init();
+    NLOGI(T, "face detector %s", err == ESP_OK ? "ready" : "FAILED to load (pictures go out without a face check)");
+#endif
 
     /* 3: BLE self-test: bring the stack up once, read the pairing state, shut it down again */
     int bonds = 0;

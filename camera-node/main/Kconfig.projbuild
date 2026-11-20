@@ -110,4 +110,61 @@ menu "Camera node"
         default 123456
         depends on NODE_BLE_PAIRING_PASSKEY
 
+    menu "Face detection"
+
+        config NODE_FACE_DETECT
+            bool "Detect faces and mark them with a frame before sending"
+            default y
+            help
+                After the wake-up the node takes pictures until a face is found (or the
+                search window is over), draws a frame around the face(s) and sends the
+                picture with a note "face detected". Without a face the last picture is
+                sent with the note "no face". Uses the espressif/human_face_detect model
+                (MSR+MNP, int8, about 1.5 MB in flash). Disable to send one plain picture.
+
+        config NODE_FACE_BOX_COLOR
+            hex "Frame colour (0xRRGGBB)"
+            default 0x00FF00
+            range 0x000000 0xFFFFFF
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_BOX_THICKNESS
+            int "Frame thickness (pixels)"
+            default 3
+            range 1 20
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_RETRY_INTERVAL_MS
+            int "Time between two pictures while searching (ms, from the start of the last one)"
+            default 500
+            range 0 5000
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_WINDOW_MS
+            int "Give up searching this long after the wake-up (ms)"
+            default 5000
+            range 500 30000
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_RETRY_SETTLE_FRAMES
+            int "Frames skipped before each retry picture (so it is a fresh one)"
+            default 1
+            range 0 5
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_JPEG_QUALITY
+            int "JPEG quality of the picture with the frame drawn in (1-100, higher = better)"
+            default 80
+            range 10 100
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_ENCODER_BGR
+            bool "JPEG encoder expects BGR byte order (swap red/blue before encoding)"
+            default y
+            depends on NODE_FACE_DETECT
+            help
+                The esp32-camera JPEG encoder treats RGB888 as BGR. If the frame comes out
+                blue when you asked for red (colours swapped), flip this option.
+    endmenu
+
 endmenu

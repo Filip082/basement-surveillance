@@ -39,8 +39,12 @@ int ble_link_bond_count(void);
  * subscribed to the Image characteristic. */
 esp_err_t ble_link_wait_ready(uint32_t timeout_ms);
 
+/* Note sent with every picture (START packet "flags" byte). */
+#define BLE_IMG_FLAG_FACE 0x01   /* a face was detected (and framed) */
+
 /* Push one JPEG as notifications (START, DATA..., END with CRC32). Needs wait_ready() first. */
-esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height);
+esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height,
+                              uint8_t flags, uint8_t faces);
 
 /* Wait for the computer to confirm (or reject) the frame via the Control characteristic. */
 ble_ack_t ble_link_wait_ack(uint32_t timeout_ms);

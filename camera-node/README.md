@@ -414,6 +414,33 @@ The receiver subscribes, collects START/DATA/END, verifies length and CRC, write
   and the receiver, keep START/DATA/END unchanged for existing receivers.
 * **A new step in the cycle:** add it in `run_cycle()` with `NSTEP(n, ...)` so it shows up in the timing log.
 
+## Face detection (frame + note)
+
+Enabled by `Camera node -> Face detection -> NODE_FACE_DETECT` (default on). After a wake-up:
+
+1. Wake camera + light sensor, IR on if dark (as before).
+2. Take a picture (JPEG), decode it to RGB, run the face detector (`espressif/human_face_detect`,
+   MSR + MNP int8 models, about 1.5 MB in flash, roughly 50 ms on the ESP32-S3 plus the JPEG decode).
+3. **Face found**: a rectangle (colour `NODE_FACE_BOX_COLOR` 0xRRGGBB, thickness `NODE_FACE_BOX_THICKNESS`)
+   is drawn around every face, the picture is re-encoded (`NODE_FACE_JPEG_QUALITY`) and sent with the note
+   *face detected* (+ number of faces).
+4. **No face**: wait until `NODE_FACE_RETRY_INTERVAL_MS` (500 ms) after the start of that shot, take another picture and
+   check again. This repeats until `NODE_FACE_WINDOW_MS` (5000 ms) after the wake-up. The last picture is then
+   sent with the note *no face*.
+5. IR off, camera standby, BLE send, sleep (steps 10-14 as before). IR stays on during the whole search when it is dark.
+
+Protocol: the START packet got two optional bytes, `flags` (bit0 = face detected) and `faces`
+(count). Receivers that ignore them keep working. `tools/receiver.py` prints the note.
+
+Files: `main/face_detect.cpp/.h` (the only C++ file: esp-dl is a C++ library, wrapped behind a C interface),
+`main/camera_node.c` (`capture_face_aware()` is the loop above), `partitions.csv` (6 MB app partition, the
+model lives in the app image).
+
+Needs a first online build: the component manager downloads `espressif/human_face_detect` and `esp-dl`.
+Run `idf.py fullclean` once because the partition table changed. To switch face detection off without touching code:
+`idf.py menuconfig` -> Camera node -> Face detection. Frame colours swapped (red asked, blue drawn)?
+flip `NODE_FACE_ENCODER_BGR`.
+
 ## Troubleshooting
 
 | Symptom | Likely cause / what to do |
