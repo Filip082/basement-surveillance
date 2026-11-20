@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Application options. Change them with `west build -t menuconfig`, or put
+# CONFIG_APP_xxx=value lines into prj.conf / boards/<board>.conf.
+
+mainmenu "master-node"
+
+menu "master-node application"
+
+config APP_CAMERA_NAME
+	string "Advertised name of the camera node"
+	default "DFR1154-CAM"
+	help
+	  The scanner connects to the first connectable advertiser whose name starts with
+	  this text. Must match "BLE device name" (NODE_BLE_DEVICE_NAME) in the camera
+	  firmware's menuconfig.
+
+config APP_IMAGE_BUF_SIZE
+	int "RAM reserved for one received picture (bytes)"
+	default 131072
+	range 4096 400000
+	help
+	  The camera's JPEG buffer is width*height/5 bytes (SVGA 800x600 = 96000).
+	  A picture bigger than this is refused. The buffer lives in .bss, so it is
+	  taken from RAM permanently (nRF5340 app core: 512 KB, nRF52840: 256 KB).
+
+config APP_SESSION_TIMEOUT_S
+	int "After a trigger: seconds to wait for the camera to show up"
+	default 20
+	range 3 120
+	help
+	  The camera needs 1-3 s to wake and take the picture, then it advertises for
+	  up to NODE_BLE_CONNECT_TIMEOUT_MS (10 s by default). Keep this above both.
+
+config APP_TRANSFER_TIMEOUT_S
+	int "Seconds allowed for connect + pairing + transfer once the camera was found"
+	default 30
+	range 5 300
+
+config APP_CAM_WAKE_PULSE_MS
+	int "Length of the wake-up pulse sent to the camera node (ms)"
+	default 100
+	range 5 2000
+	help
+	  The camera wakes on the LEVEL of its wake pin, so the line has to stay active
+	  for a moment. It then waits for the line to be released again.
+
+config APP_PROGRESS_LOG_BYTES
+	int "Log the received byte count every this many bytes"
+	default 8192
+	range 512 100000
+
+config APP_AUTO_REPAIR
+	bool "Forget the stored bond and pair again when the camera lost its key"
+	default y
+	help
+	  If the camera was factory-reset it no longer knows this device and refuses to
+	  encrypt. With this option the stored bond is deleted and one new pairing
+	  attempt is made. NOTE: with "Just Works" pairing this accepts whichever device
+	  answers, so switch it off in a product that must not re-pair silently.
+
+endmenu
+
+source "Kconfig.zephyr"
