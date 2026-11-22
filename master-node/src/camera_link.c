@@ -30,9 +30,11 @@ static const struct bt_uuid_128 uuid_ctrl =
 static const struct bt_uuid_128 uuid_img =
 	BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xdfa10003, 0x5b3c, 0x4f6d, 0x9e21, 0x0a4c7b8d1e00));
 
-#define PKT_START 0x01   /* [01][len u32][w u16][h u16][flags u8][faces u8] (little endian;
-			  * the last two bytes are optional, older cameras do not send them) */
-#define IMG_FLAG_FACE 0x01   /* flags bit0: the camera detected a face and framed it */
+#define PKT_START 0x01   /* [01][len u32][w u16][h u16][flags u8][faces u8][humans u8]
+			  * (little endian; the last three bytes are optional, older cameras
+			  * do not send them) */
+#define IMG_FLAG_FACE  0x01  /* flags bit0: a face was detected (and framed) */
+#define IMG_FLAG_HUMAN 0x02  /* flags bit1: a person was detected */
 #define PKT_DATA  0x02   /* [02][seq u16][bytes ...]                      */
 #define PKT_END   0x03   /* [03][crc32 u32]                               */
 
@@ -397,10 +399,13 @@ static void rx_start(const uint8_t *d, uint16_t len)
 	uint16_t w = sys_get_le16(&d[5]);
 	uint16_t h = sys_get_le16(&d[7]);
 
-	bool face = len >= 11 && (d[9] & IMG_FLAG_FACE);
+	uint8_t flags = len >= 11 ? d[9] : 0;
 	uint8_t faces = len >= 11 ? d[10] : 0;
+	uint8_t humans = len >= 12 ? d[11] : 0;
+	enum image_status status = (flags & IMG_FLAG_FACE) ? IMAGE_FACE :
+				   (flags & IMG_FLAG_HUMAN) ? IMAGE_HUMAN : IMAGE_NO_HUMAN;
 
-	if (image_store_begin(total, w, h, face, faces) != 0) {
+	if (image_store_begin(total, w, h, status, humans, faces) != 0) {
 		LOG_ERR("picture of %u bytes does not fit into the %u byte buffer", total,
 			(unsigned int)CONFIG_APP_IMAGE_BUF_SIZE);
 		finish(CAMLINK_TOO_BIG);
@@ -411,8 +416,8 @@ static void rx_start(const uint8_t *d, uint16_t len)
 	s.rx_seq = 0;
 	s.rx_next_log = CONFIG_APP_PROGRESS_LOG_BYTES;
 	s.rx_t0 = k_uptime_get();
-	LOG_INF("incoming picture %ux%u, %u bytes, note: %s", w, h, total,
-		face ? "FACE DETECTED" : "no face");
+	LOG_INF("incoming picture %ux%u, %u bytes, status: %s", w, h, total,
+		image_status_str(status));
 }
 
 static void rx_data(const uint8_t *d, uint16_t len)

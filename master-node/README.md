@@ -30,7 +30,7 @@ if (take_image()) {                      // wake the camera, receive its picture
 4. switches Bluetooth off (`bt_disable`),
 5. returns `true` if a complete, CRC-checked picture is available through `get_image()`.
 
-`get_image()` returns the picture (pointer + length + size + `face_detected` / `face_count` note from the camera) or `NULL`. The data stays valid until
+`get_image()` returns the picture (pointer + length + size + `status` (`IMAGE_FACE` / `IMAGE_HUMAN` / `IMAGE_NO_HUMAN`) and `human_count` / `face_count`, as reported by the camera) or `NULL`. The data stays valid until
 the next `take_image()`; do not call it while `take_image()` runs.
 
 `src/main.c` is only an example caller: it sleeps until the trigger input (Button 1 on the DK)
@@ -138,19 +138,29 @@ changing `west.yml` run `cd /workdir && west update --narrow -o=--depth=1`).
 
 ### nRF5340 DK (from the host, USB cable to the DK's J-Link port)
 
-The container has no USB access, so flash from the host with
-[nRF Util](https://docs.nordicsemi.com/bundle/nrfutil/page/README.html) or the older nRF
-Command Line Tools. Find the images first: `find build -name zephyr.hex`.
-The network-core image is under `build/hci_ipc/`, the application under `build/master_node/`.
+The container has no USB access, so flash from the host. The DK has two cores, so there are **two hex files**
+(find them with `find build -name zephyr.hex`):
 
-```bash
-nrfjprog --program build/hci_ipc/zephyr/zephyr.hex     --coprocessor CP_NETWORK --chiperase -f NRF53
-nrfjprog --program build/master_node/zephyr/zephyr.hex --sectorerase --verify    -f NRF53
-nrfjprog --reset -f NRF53
+```
+build/hci_ipc/zephyr/zephyr.hex        network core (Bluetooth controller)
+build/master-node/zephyr/zephyr.hex    application core (this firmware)
 ```
 
-If flashing is refused (APPROTECT), add `--recover` once. `west flash` works too, from a host
-that has Zephyr set up and the J-Link drivers.
+**nRF Connect Programmer** (nRF Connect for Desktop, tested version 4.6.2): select the DK in the device list,
+**Add file** -> pick both hex files, check that the memory layout shows the network-core and application-core
+regions, click **Write** (tick *Erase all* if the first attempt is refused), then reset the board.
+
+**nRF Util** (command line):
+
+```bash
+nrfutil device program --firmware build/hci_ipc/zephyr/zephyr.hex     --core Network
+nrfutil device program --firmware build/master-node/zephyr/zephyr.hex --core Application
+nrfutil device reset
+```
+
+If a protection error appears, run `nrfutil device recover --core Network` and
+`nrfutil device recover --core Application` once. The J-Link drive that appears on the host also accepts `.hex` files
+by drag and drop, but flashing both cores that way is less reliable.
 
 Console: the DK shows a serial port (115200 8N1), usually the first of the two J-Link ports.
 
@@ -238,8 +248,8 @@ only starts the scan and waits on a semaphore.
 
 Service `dfa10001-5b3c-4f6d-9e21-0a4c7b8d1e00`
 * Control `dfa10002-...` (write): `01` = ACK picture received, `02` = please resend
-* Image   `dfa10003-...` (notify): `01 len32 w16 h16 flags8 faces8` START (flags bit0 = face detected, the two
-  last bytes are optional), `02 seq16 bytes` DATA, `03 crc32` END
+* Image   `dfa10003-...` (notify): `01 len32 w16 h16 flags8 faces8 humans8` START (flags bit0 = face detected, bit1 = person
+  detected; the last three bytes are optional), `02 seq16 bytes` DATA, `03 crc32` END
   (little endian; CRC32 = zlib/IEEE of the JPEG)
 
 The camera only sends after the link is encrypted AND the Image characteristic is subscribed.

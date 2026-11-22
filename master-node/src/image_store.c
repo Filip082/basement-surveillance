@@ -14,14 +14,15 @@ static struct {
 	uint32_t crc;
 	uint16_t width;
 	uint16_t height;
-	bool face_detected;
+	enum image_status status;
+	uint8_t human_count;
 	uint8_t face_count;
 	bool valid;           /* a committed picture is in buf */
 	int64_t saved_at_ms;
 } st;
 
-int image_store_begin(uint32_t len, uint16_t width, uint16_t height, bool face_detected,
-		      uint8_t face_count)
+int image_store_begin(uint32_t len, uint16_t width, uint16_t height, enum image_status status,
+		      uint8_t human_count, uint8_t face_count)
 {
 	st.valid = false;
 	st.received = 0;
@@ -37,7 +38,8 @@ int image_store_begin(uint32_t len, uint16_t width, uint16_t height, bool face_d
 	st.expected = len;
 	st.width = width;
 	st.height = height;
-	st.face_detected = face_detected;
+	st.status = status;
+	st.human_count = human_count;
 	st.face_count = face_count;
 	return 0;
 }
@@ -91,8 +93,19 @@ bool image_store_get(struct stored_image *out)
 	out->len = st.received;
 	out->width = st.width;
 	out->height = st.height;
-	out->face_detected = st.face_detected;
+	out->status = st.status;
+	out->human_count = st.human_count;
 	out->face_count = st.face_count;
 	out->saved_at_ms = st.saved_at_ms;
 	return true;
+}
+
+const char *image_status_str(enum image_status status)
+{
+	switch (status) {
+	case IMAGE_NO_HUMAN: return "no human detected";
+	case IMAGE_HUMAN:    return "human detected";
+	case IMAGE_FACE:     return "face detected";
+	}
+	return "?";
 }

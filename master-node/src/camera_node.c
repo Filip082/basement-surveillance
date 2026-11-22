@@ -44,9 +44,8 @@ bool take_image(void)
 
 	if (r == CAMLINK_OK && image_store_get(&current)) {
 		have_image = true;
-		LOG_INF("take_image: picture ready, %u bytes (%ux%u), %s", current.len, current.width,
-			current.height,
-			current.face_detected ? "face detected" : "no face detected");
+		LOG_INF("take_image: picture ready, %u bytes (%ux%u), status: %s", current.len,
+			current.width, current.height, image_status_str(current.status));
 	} else {
 		LOG_WRN("take_image: no picture (%s)", camlink_result_str(r));
 	}

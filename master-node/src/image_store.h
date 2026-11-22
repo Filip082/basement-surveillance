@@ -17,20 +17,28 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Status note sent by the camera node with every picture. */
+enum image_status {
+	IMAGE_NO_HUMAN,    /* nobody detected within the search window */
+	IMAGE_HUMAN,       /* a person was detected, but no face */
+	IMAGE_FACE,        /* a face was detected (and framed) */
+};
+
 struct stored_image {
 	const uint8_t *data;   /* JPEG bytes, points into the static buffer */
 	uint32_t len;          /* number of valid bytes */
 	uint16_t width;        /* as announced by the camera */
 	uint16_t height;
-	bool face_detected;    /* note from the camera node: a face was found (and framed) */
-	uint8_t face_count;    /* number of faces it found */
+	enum image_status status;   /* note from the camera node */
+	uint8_t human_count;        /* number of people it found */
+	uint8_t face_count;         /* number of faces it found */
 	int64_t saved_at_ms;   /* k_uptime_get() when the picture was committed */
 };
 
 /* Start a new picture of `len` bytes. Discards the stored one.
  * Returns 0, -EINVAL (len == 0) or -ENOSPC (does not fit). */
-int image_store_begin(uint32_t len, uint16_t width, uint16_t height, bool face_detected,
-		      uint8_t face_count);
+int image_store_begin(uint32_t len, uint16_t width, uint16_t height, enum image_status status,
+		      uint8_t human_count, uint8_t face_count);
 
 /* Append received bytes. Returns 0 or -EOVERFLOW (more than announced / than fits). */
 int image_store_append(const uint8_t *data, uint32_t n);
@@ -50,3 +58,6 @@ void image_store_abort(void);
 
 /* Fetch the last committed picture. Returns false if there is none. */
 bool image_store_get(struct stored_image *out);
+
+/* Readable name of a status, for logs. */
+const char *image_status_str(enum image_status status);
