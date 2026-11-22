@@ -414,6 +414,45 @@ The receiver subscribes, collects START/DATA/END, verifies length and CRC, write
   and the receiver, keep START/DATA/END unchanged for existing receivers.
 * **A new step in the cycle:** add it in `run_cycle()` with `NSTEP(n, ...)` so it shows up in the timing log.
 
+## Wake-up requests: picture or battery
+
+The wake input (`NODE_WAKE_GPIO`, GPIO10, active LOW, internal pull-up = idle HIGH) now carries two requests,
+told apart by how long the line stays LOW after the wake-up:
+
+| LOW pulse                                    | Request                                   |
+|----------------------------------------------|-------------------------------------------|
+| shorter than `NODE_BATTERY_REQUEST_MS` (200) | take a picture (the whole flow above)     |
+| longer than that                             | measure the battery and send a report     |
+
+`wake_is_battery_request()` in `camera_node.c` polls the line for at most that time right after waking, so a picture
+request starts when the pulse ends (the master's 50 ms pulse costs ~50 ms). The node sleeps again only after the
+line is HIGH again (`power_sleep_until_event()` already waits for that). Keep the master's pulses clearly on each side of
+the limit (default: 50 ms picture, 300 ms battery).
+
+**Battery cycle** (`run_battery_cycle()`): measure -> BLE on -> send report -> wait for the ACK -> BLE off -> sleep.
+The camera is not touched at all, so it is fast and cheap. Logged as steps 6, 7, 11, 12, 13.
+
+**ADC** (`main/battery.c`, `battery_measure()`): the ADC unit is created, `NODE_BATTERY_SAMPLES` (16) calibrated conversions
+are averaged (12 dB attenuation, curve-fitting calibration, 2 warm-up conversions discarded), then the unit is deleted,
+so the ADC is only powered during the measurement. Settings under *Camera node -> Battery monitor*:
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `NODE_BATTERY_ADC_GPIO` | 11 | pin to measure (ADC capable, GPIO1..20; not one used by camera / LED / IR / wake) |
+| `NODE_BATTERY_DIVIDER_X100` | 400 | battery voltage / pin voltage x 100 (1/4 divider = 400) |
+| `NODE_BATTERY_MIN_MV` | 6000 | **battery** voltage that counts as 0 % |
+| `NODE_BATTERY_MAX_MV` | 8400 | **battery** voltage that counts as 100 % |
+| `NODE_BATTERY_SAMPLES` | 16 | samples averaged |
+| `NODE_BATTERY_REQUEST_MS` | 200 | LOW time that means "battery" |
+
+Min / max are on the battery side of the divider (so 7.4 V battery: about 6000 .. 8400 mV). The percentage is linear;
+a real Li-ion discharge curve is not, so treat it as an indication. If you would rather give min / max as the voltage at the pin, set the divider to 100.
+Hardware: the pin must stay below ~3.1 V at full battery (8.4 V / 4 = 2.1 V is fine); use a high-impedance divider only with
+about 100 nF from the pin to GND (the ADC needs a low source impedance); the divider draws current all the time (e.g. 1 M + 330 k = ~6 uA at 8 V).
+
+**BLE message**: new packet type on the Image characteristic: `04 percent8 battery_mV16 pin_mV16` (little endian). The
+receiver ACKs it like a picture (Control `01`). `tools/receiver.py` prints it.
+
 ## Person and face detection (frame + status)
 
 Enabled by `Camera node -> Face detection -> NODE_FACE_DETECT` (default on). After a wake-up the node

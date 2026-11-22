@@ -208,4 +208,45 @@ menu "Camera node"
                 blue when you asked for red (colours swapped), flip this option.
     endmenu
 
+    menu "Battery monitor"
+
+        config NODE_BATTERY_REQUEST_MS
+            int "Wake line LOW for longer than this = battery request (ms)"
+            default 200
+            range 20 5000
+            help
+                Wake-up by a LOW pulse on the wake pin: a pulse SHORTER than this takes a
+                picture, a pulse LONGER than this reports the battery. The master must send
+                e.g. 50 ms for a picture and 300 ms for the battery.
+
+        config NODE_BATTERY_ADC_GPIO
+            int "Battery voltage input GPIO (must be ADC capable: 1..20 on the ESP32-S3)"
+            default 11
+            range 1 20
+            help
+                Connect the battery through a resistor divider (and about 100 nF to GND at the
+                pin). Must not be a GPIO used by the camera, the LED, IR or the wake input.
+                GPIO11 is the unused SD card MOSI line on the DFR1154.
+
+        config NODE_BATTERY_DIVIDER_X100
+            int "Divider ratio x100 (battery voltage / pin voltage x 100)"
+            default 400
+            range 100 2000
+            help
+                1/4 divider = 400. Keep the pin below about 3.1 V at full battery.
+
+        config NODE_BATTERY_MIN_MV
+            int "Battery voltage that counts as 0 % (millivolt, BATTERY side of the divider)"
+            default 6000
+
+        config NODE_BATTERY_MAX_MV
+            int "Battery voltage that counts as 100 % (millivolt, BATTERY side of the divider)"
+            default 8400
+
+        config NODE_BATTERY_SAMPLES
+            int "ADC samples averaged per measurement"
+            default 16
+            range 1 128
+    endmenu
+
 endmenu

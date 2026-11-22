@@ -53,6 +53,13 @@ class Assembler:
             self.face = (data[10] if len(data) >= 11 else 0, data[11] if len(data) >= 12 else 0)
             self.buf, self.expected, self.size, self.seq = bytearray(), n, (w, h), 0
             self.t0 = asyncio.get_running_loop().time()
+        elif kind == 4:                                 # BATTERY: percent u8, battery mV u16, pin mV u16
+            pct, vbat, vpin = struct.unpack_from("<BHH", data, 1)
+            self.battery = (pct, vbat, vpin)
+            self.ok = True
+            self.jpeg = None
+            self.info = f"BATTERY {pct} % ({vbat} mV battery, {vpin} mV at the pin)"
+            self.complete.set()
         elif kind == 2 and self.buf is not None:        # DATA: seq u16 + bytes
             (seq,) = struct.unpack_from("<H", data, 1)
             if seq != self.seq:
@@ -100,6 +107,10 @@ async def session(device, args, outdir: pathlib.Path) -> bool:
                 break
             asm.complete.clear()
             print(f"  {asm.info}")
+            if asm.ok and asm.jpeg is None:                  # battery report: nothing to save
+                saved = True
+                await client.write_gatt_char(CTRL, b"\x01", response=False)   # ACK
+                break
             if asm.ok:
                 name = outdir / f"capture_{datetime.datetime.now():%Y%m%d_%H%M%S}.jpg"
                 name.write_bytes(asm.jpeg)

@@ -47,6 +47,9 @@ esp_err_t ble_link_wait_ready(uint32_t timeout_ms);
 esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height,
                               uint8_t flags, uint8_t faces, uint8_t humans);
 
+/* Send the battery report ([04][percent][battery mV][pin mV]). Needs wait_ready() first. */
+esp_err_t ble_link_send_battery(uint8_t percent, uint16_t battery_mv, uint16_t adc_mv);
+
 /* Wait for the computer to confirm (or reject) the frame via the Control characteristic. */
 ble_ack_t ble_link_wait_ack(uint32_t timeout_ms);
 

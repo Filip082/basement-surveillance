@@ -28,6 +28,7 @@
 
 #include "als.h"
 #include "ble_link.h"
+#include "battery.h"
 #include "board_io.h"
 #include "camera_service.h"
 #include "vision.h"
@@ -307,6 +308,61 @@ static void run_cycle(bool pairing_window)
     NLOGI(T, "cycle finished in %lld ms", (long long)node_log_elapsed_ms());
 }
 
+/*
+ * The wake-up line went active. A SHORT pulse (released within NODE_BATTERY_REQUEST_MS)
+ * asks for a picture, a LONG one (still active after that time) asks for the battery level.
+ * Returns true for a battery request. Polls only for at most that time.
+ */
+static bool wake_is_battery_request(void)
+{
+    const int64_t t0 = esp_timer_get_time();
+    while (power_wake_pin_active()) {
+        if ((esp_timer_get_time() - t0) / 1000 >= CONFIG_NODE_BATTERY_REQUEST_MS) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return false;
+}
+
+/*
+ * Battery cycle: measure (ADC on only for the measurement), start BLE, send the battery
+ * report, wait for the ACK, BLE off. The camera is not touched at all.
+ */
+static void run_battery_cycle(void)
+{
+    node_log_cycle_start();
+    NSTEP(6, "BATTERY request (wake line LOW for more than %d ms)", CONFIG_NODE_BATTERY_REQUEST_MS);
+
+    battery_reading_t bat;
+    if (battery_measure(&bat) != ESP_OK) {                          /* 7: ADC on -> sample -> off */
+        NSTEP(7, "battery measurement FAILED - nothing sent");
+        return;
+    }
+    NSTEP(7, "battery %u %% (%u mV, %u mV at the pin)", bat.percent, bat.battery_mv, bat.adc_mv);
+
+    if (ble_link_start(true) == ESP_OK) {                           /* 11 */
+        NSTEP(11, "BLE started, advertising; waiting up to %d ms for the computer",
+              CONFIG_NODE_BLE_CONNECT_TIMEOUT_MS);
+        if (ble_link_wait_ready(CONFIG_NODE_BLE_CONNECT_TIMEOUT_MS) == ESP_OK) {
+            if (ble_link_send_battery(bat.percent, bat.battery_mv, bat.adc_mv) == ESP_OK) {   /* 12 */
+                NSTEP(12, "battery report sent, waiting for ACK");
+                ble_ack_t ack = ble_link_wait_ack(CONFIG_NODE_BLE_ACK_TIMEOUT_MS);
+                NSTEP(12, ack == BLE_ACK_OK ? "ACK received - delivered" : "no ACK - assuming delivered");
+            } else {
+                NSTEP(12, "sending the battery report FAILED");
+            }
+        } else {
+            NSTEP(11, "no computer -> report dropped");
+        }
+    } else {
+        NSTEP(11, "BLE failed to start -> report dropped");
+    }
+    ble_link_stop();
+    NSTEP(13, "BLE off");
+    NLOGI(T, "battery cycle finished in %lld ms", (long long)node_log_elapsed_ms());
+}
+
 void app_main(void)
 {
 #if !LOGS_ENABLED
@@ -390,7 +446,11 @@ void app_main(void)
               );
         first = false;
         if (power_sleep_until_event()) {
-            run_cycle(false);
+            if (wake_is_battery_request()) {
+                run_battery_cycle();
+            } else {
+                run_cycle(false);
+            }
         } else {
             vTaskDelay(pdMS_TO_TICKS(500));     /* sleep failed: do not spin */
         }
