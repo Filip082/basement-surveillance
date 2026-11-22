@@ -37,7 +37,7 @@ static const ble_uuid128_t UUID_IMAGE = CAM_UUID128(0x03);
 
 /* Image notification packet types (little-endian fields) */
 enum {
-    PKT_START = 0x01,   /* [01][len u32][w u16][h u16][flags u8][faces u8]*/
+    PKT_START = 0x01,   /* [01][len u32][w u16][h u16][flags u8][faces u8][humans u8]*/
     PKT_DATA  = 0x02,   /* [02][seq u16][jpeg bytes...] */
     PKT_END   = 0x03,   /* [03][crc32 u32]  zlib CRC32 of the whole JPEG */
 };
@@ -436,7 +436,7 @@ static bool notify_retry(const uint8_t *data, size_t len)
 }
 
 esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height,
-                              uint8_t flags, uint8_t faces)
+                              uint8_t flags, uint8_t faces, uint8_t humans)
 {
     if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
         return ESP_ERR_INVALID_STATE;
@@ -454,13 +454,14 @@ esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, u
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t start[11] = { PKT_START };
+    uint8_t start[12] = { PKT_START };
     uint32_t len32 = (uint32_t)len;
     memcpy(&start[1], &len32, 4);                         /* ESP32 is little-endian */
     memcpy(&start[5], &width, 2);
     memcpy(&start[7], &height, 2);
     start[9] = flags;                                     /* bit0: face detected */
     start[10] = faces;                                    /* number of faces found */
+    start[11] = humans;                                   /* number of people found */
     if (!notify_retry(start, sizeof(start))) {
         return ESP_FAIL;
     }

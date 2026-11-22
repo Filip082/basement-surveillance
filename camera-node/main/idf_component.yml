@@ -16,3 +16,4 @@ dependencies:
   #   public: true
   espressif/esp32-camera: '^2.1.8'
   espressif/human_face_detect: '^0.5.0'
+  espressif/pedestrian_detect: '^0.3.0'

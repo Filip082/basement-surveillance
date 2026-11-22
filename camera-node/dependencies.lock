@@ -91,6 +91,17 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 0.5.2
+  espressif/pedestrian_detect:
+    component_hash: 6afb7d8f06ec7ec94e2ee2ae1cff737be517e9ebbc6035a38e6e9783bafd4910
+    dependencies:
+    - name: espressif/esp-dl
+      registry_url: https://components.espressif.com
+      require: private
+      version: ~3.3.14
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.3.3
   idf:
     source:
       type: idf
@@ -98,7 +109,8 @@ dependencies:
 direct_dependencies:
 - espressif/esp32-camera
 - espressif/human_face_detect
+- espressif/pedestrian_detect
 - idf
-manifest_hash: 2d768d4a2b8b47e4080a1699332ddc76fd5b2cceaea9df3526575fb2baea3ee2
+manifest_hash: b17882e4c00147cd5731d7c2bbb767fd02b22ddfba7354df65e5258715c6c415
 target: esp32s3
 version: 3.0.0

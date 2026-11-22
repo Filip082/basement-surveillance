@@ -42,13 +42,15 @@ class Assembler:
         self.expected = 0
         self.size = (0, 0)
         self.seq = 0
-        self.face = (False, 0)
+        self.flags = 0
+        self.face = (0, 0)
 
     def on_notify(self, _char, data: bytearray):
         kind = data[0]
         if kind == 1:                                   # START: len u32, w u16, h u16
             n, w, h = struct.unpack_from("<IHH", data, 1)
-            self.face = (len(data) >= 11 and bool(data[9] & 1), data[10] if len(data) >= 11 else 0)
+            self.flags = data[9] if len(data) >= 11 else 0
+            self.face = (data[10] if len(data) >= 11 else 0, data[11] if len(data) >= 12 else 0)
             self.buf, self.expected, self.size, self.seq = bytearray(), n, (w, h), 0
             self.t0 = asyncio.get_running_loop().time()
         elif kind == 2 and self.buf is not None:        # DATA: seq u16 + bytes
@@ -66,7 +68,7 @@ class Assembler:
             self.jpeg = bytes(self.buf)
             self.info = (f"{self.size[0]}x{self.size[1]}, {len(self.buf)} bytes in {dt:.2f} s "
                          f"({len(self.buf) / dt / 1000:.1f} kB/s), CRC {'OK' if self.ok else 'MISMATCH'}, "
-                         f"{'FACE DETECTED (%d)' % self.face[1] if self.face[0] else 'no face'}")
+                         f"{'FACE DETECTED (%d)' % self.face[0] if self.flags & 1 else 'HUMAN DETECTED (%d)' % self.face[1] if self.flags & 2 else 'no human detected'}")
             self._reset()
             self.complete.set()
 

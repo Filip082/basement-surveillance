@@ -414,31 +414,43 @@ The receiver subscribes, collects START/DATA/END, verifies length and CRC, write
   and the receiver, keep START/DATA/END unchanged for existing receivers.
 * **A new step in the cycle:** add it in `run_cycle()` with `NSTEP(n, ...)` so it shows up in the timing log.
 
-## Face detection (frame + note)
+## Person and face detection (frame + status)
 
-Enabled by `Camera node -> Face detection -> NODE_FACE_DETECT` (default on). After a wake-up:
+Enabled by `Camera node -> Face detection -> NODE_FACE_DETECT` (default on). After a wake-up the node
+repeats the loop below until `NODE_FACE_WINDOW_MS` (5000 ms) after the wake-up, with
+`NODE_FACE_RETRY_INTERVAL_MS` (500 ms) between the starts of two pictures (same in daylight and with IR at night):
 
-1. Wake camera + light sensor, IR on if dark (as before).
-2. Take a picture (JPEG), decode it to RGB, run the face detector (`espressif/human_face_detect`,
-   MSR + MNP int8 models, about 1.5 MB in flash, roughly 50 ms on the ESP32-S3 plus the JPEG decode).
-3. **Face found**: a rectangle (colour `NODE_FACE_BOX_COLOR` 0xRRGGBB, thickness `NODE_FACE_BOX_THICKNESS`)
-   is drawn around every face, the picture is re-encoded (`NODE_FACE_JPEG_QUALITY`) and sent with the note
-   *face detected* (+ number of faces).
-4. **No face**: wait until `NODE_FACE_RETRY_INTERVAL_MS` (500 ms) after the start of that shot, take another picture and
-   check again. This repeats until `NODE_FACE_WINDOW_MS` (5000 ms) after the wake-up. The last picture is then
-   sent with the note *no face*.
-5. IR off, camera standby, BLE send, sleep (steps 10-14 as before). IR stays on during the whole search when it is dark.
+```
+take picture -> person?  no  -> next picture
+                         yes -> face?  yes -> STOP, send this picture, status FACE
+                                       no  -> keep this picture (status HUMAN), next picture
+time over:   a kept person picture -> send it, status HUMAN
+             nobody ever seen      -> send the last picture, status NO HUMAN
+```
+Then IR off, camera standby, BLE send, sleep (steps 10-14 as before). IR stays on during the whole search when it is dark.
 
-Protocol: the START packet got two optional bytes, `flags` (bit0 = face detected) and `faces`
-(count). Receivers that ignore them keep working. `tools/receiver.py` prints the note.
+* Models: `espressif/pedestrian_detect` (person, 224x224 int8, roughly 115 ms on the S3) and
+  `espressif/human_face_detect` (face, MSR+MNP, roughly 40 ms). Both live in the app image (`partitions.csv`
+  gives it 6 MB). Each analysed picture is decoded once (JPEG -> RGB888 in PSRAM).
+* Frames: faces are framed in `NODE_FACE_BOX_COLOR` (0xRRGGBB). A person without a face gets a frame in
+  `NODE_PERSON_BOX_COLOR` (`NODE_PERSON_DRAW_BOX`). Thickness `NODE_FACE_BOX_THICKNESS`. Drawing means a re-encode
+  (`NODE_FACE_JPEG_QUALITY`); a picture without anything to frame is sent untouched.
+* Thresholds: `NODE_PERSON_MIN_SCORE_PCT`, `NODE_FACE_MIN_SCORE_PCT` (default 50 %).
+* **Limits you should know**: the person model is a pedestrian detector, trained on whole bodies. A person very close to the
+  camera, sitting, or only partly in view may not count as a person, and then the face check never runs. Turn on
+  `NODE_FACE_WITHOUT_PERSON` to run the face check on every picture (about 40 ms more); a face then also counts as a person.
+  Night pictures with IR are grayscale-like and detection is usually less certain: tune the score thresholds with real pictures.
+* `NODE_PERSON_DETECT` off = faces only (status FACE / NO HUMAN, the previous behaviour). `NODE_FACE_DETECT` off = one plain picture.
 
-Files: `main/face_detect.cpp/.h` (the only C++ file: esp-dl is a C++ library, wrapped behind a C interface),
-`main/camera_node.c` (`capture_face_aware()` is the loop above), `partitions.csv` (6 MB app partition, the
-model lives in the app image).
+Protocol: START packet = `01 len32 w16 h16 flags8 faces8 humans8`; `flags` bit0 = face detected, bit1 = person
+detected (face implies person). Receivers that ignore the last three bytes keep working. `tools/receiver.py`
+prints the status.
 
-Needs a first online build: the component manager downloads `espressif/human_face_detect` and `esp-dl`.
-Run `idf.py fullclean` once because the partition table changed. To switch face detection off without touching code:
-`idf.py menuconfig` -> Camera node -> Face detection. Frame colours swapped (red asked, blue drawn)?
+Files: `main/vision.cpp/.h` (the only C++ file: esp-dl is a C++ library, wrapped behind a C interface),
+`main/camera_node.c` (`capture_smart()` is the loop above), `partitions.csv`.
+
+First build downloads `espressif/pedestrian_detect`, `espressif/human_face_detect` and `esp-dl`
+(network needed). Run `idf.py fullclean` once because the partition table changed. Colours swapped (red asked, blue drawn)?
 flip `NODE_FACE_ENCODER_BGR`.
 
 ## Troubleshooting

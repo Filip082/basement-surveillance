@@ -30,7 +30,7 @@
 #include "ble_link.h"
 #include "board_io.h"
 #include "camera_service.h"
-#include "face_detect.h"
+#include "vision.h"
 #include "node_config.h"
 #include "node_log.h"
 #include "power.h"
@@ -61,6 +61,7 @@ typedef struct {
     uint16_t width, height;
     uint8_t flags;          /* BLE_IMG_FLAG_* */
     uint8_t faces;
+    uint8_t humans;
     camera_fb_t *fb;        /* camera frame to give back (or NULL) */
     uint8_t *owned;         /* malloc'ed buffer to free (picture with frames), or NULL */
 } out_image_t;
@@ -98,15 +99,38 @@ static bool capture_single(bool dark, out_image_t *out)
 }
 
 #ifdef CONFIG_NODE_FACE_DETECT
-/*
- * Steps 9a-9c with face search: take a picture, look for a face. Face found -> draw
- * the frame and return that picture. No face -> wait until
- * NODE_FACE_RETRY_INTERVAL_MS after the start of the last shot and try again, until
- * NODE_FACE_WINDOW_MS have passed since the wake-up; the last picture is then returned
- * without a face note.
- */
-static bool capture_face_aware(bool dark, int64_t t_wake_us, out_image_t *out)
+/* Copy a camera frame into our own buffer so the frame can be given back to the driver. */
+static bool out_copy_fb(out_image_t *o, const camera_fb_t *fb)
 {
+    uint8_t *copy = heap_caps_malloc(fb->len, MALLOC_CAP_SPIRAM);
+    if (!copy) {
+        return false;
+    }
+    memcpy(copy, fb->buf, fb->len);
+    o->owned = copy;
+    o->buf = copy;
+    o->len = fb->len;
+    o->width = fb->width;
+    o->height = fb->height;
+    return true;
+}
+
+/*
+ * Steps 9a-9c with person / face search. Repeats until NODE_FACE_WINDOW_MS after the
+ * wake-up, with NODE_FACE_RETRY_INTERVAL_MS between the starts of two pictures:
+ *
+ *   person?  no            -> next picture
+ *            yes, face?    -> yes: STOP, send this picture ("face detected")
+ *                             no:  remember this picture ("human"), next picture
+ *
+ * When the time is over: the remembered person picture goes out as "human detected",
+ * or - if no person was ever seen - the last picture as "no human detected".
+ * (With NODE_PERSON_DETECT off, only faces are searched: face / none.)
+ */
+static bool capture_smart(bool dark, int64_t t_wake_us, out_image_t *out)
+{
+    out_image_t saved = {0};        /* best picture so far that contains a person */
+
     for (int shot = 1;; shot++) {
         int64_t t_shot_us = esp_timer_get_time();
         camera_fb_t *fb = camsvc_capture(shot == 1 ? (dark ? NODE_SETTLE_FRAMES_NIGHT
@@ -114,37 +138,75 @@ static bool capture_face_aware(bool dark, int64_t t_wake_us, out_image_t *out)
                                                    : CONFIG_NODE_FACE_RETRY_SETTLE_FRAMES);
         if (!fb) {
             NSTEP(9, "shot %d: capture FAILED", shot);
+            if (saved.buf) {                          /* still have a person picture */
+                *out = saved;
+                return true;
+            }
             return false;
         }
 
-        face_result_t fr;
-        esp_err_t err = face_detect_run(fb->buf, fb->len, true, &fr);
+        vision_result_t vr;
+        esp_err_t err = vision_analyze(fb->buf, fb->len, &vr);
         int64_t now_us = esp_timer_get_time();
-        NSTEP(9, "shot %d: %ux%u, %u bytes, %d face(s) (detection %lld ms, %lld ms since wake-up)",
+        NSTEP(9, "shot %d: %ux%u, %u bytes, %d person(s), %d face(s) (analysis %lld ms, %lld ms since wake-up)",
               shot, (unsigned)fb->width, (unsigned)fb->height, (unsigned)fb->len,
-              err == ESP_OK ? fr.faces : -1, (long long)((now_us - t_shot_us) / 1000),
-              (long long)((now_us - t_wake_us) / 1000));
+              err == ESP_OK ? vr.humans : -1, err == ESP_OK ? vr.faces : -1,
+              (long long)((now_us - t_shot_us) / 1000), (long long)((now_us - t_wake_us) / 1000));
 
-        if (err != ESP_OK) {                         /* detector broken: send the picture as is */
-            out_from_fb(out, fb);
-            return true;
-        }
-        if (fr.faces > 0) {
-            out_from_fb(out, fb);
-            out->flags = BLE_IMG_FLAG_FACE;
-            out->faces = (uint8_t)(fr.faces > 255 ? 255 : fr.faces);
-            if (fr.jpeg) {                           /* use the picture with the frames */
+        if (err != ESP_OK) {                          /* analysis broken: send as is */
+            if (saved.buf) {
+                *out = saved;
                 camsvc_release(fb);
-                out->fb = NULL;
-                out->owned = fr.jpeg;
-                out->buf = fr.jpeg;
-                out->len = fr.jpeg_len;
+            } else {
+                out_from_fb(out, fb);
             }
             return true;
         }
+
+        if (vr.faces > 0) {                           /* 3: face -> done */
+            out_release(&saved);
+            if (vr.jpeg) {
+                out->owned = vr.jpeg;
+                out->buf = vr.jpeg;
+                out->len = vr.jpeg_len;
+                out->width = fb->width;
+                out->height = fb->height;
+                camsvc_release(fb);
+            } else {
+                out_from_fb(out, fb);
+            }
+            out->flags = BLE_IMG_FLAG_FACE | BLE_IMG_FLAG_HUMAN;
+            out->faces = (uint8_t)(vr.faces > 255 ? 255 : vr.faces);
+            out->humans = (uint8_t)(vr.humans > 255 ? 255 : vr.humans);
+            return true;
+        }
+
+        if (vr.humans > 0) {                          /* 2: person without face -> remember it */
+            out_release(&saved);
+            if (vr.jpeg) {
+                saved.owned = vr.jpeg;
+                saved.buf = vr.jpeg;
+                saved.len = vr.jpeg_len;
+                saved.width = fb->width;
+                saved.height = fb->height;
+            } else if (!out_copy_fb(&saved, fb)) {
+                NLOGW(T, "no memory to keep the picture");
+            }
+            saved.flags = BLE_IMG_FLAG_HUMAN;
+            saved.humans = (uint8_t)(vr.humans > 255 ? 255 : vr.humans);
+        } else {
+            free(vr.jpeg);
+        }
+
         if ((now_us - t_wake_us) / 1000 >= CONFIG_NODE_FACE_WINDOW_MS) {
-            NSTEP(9, "no face within %d ms - sending the last picture", CONFIG_NODE_FACE_WINDOW_MS);
-            out_from_fb(out, fb);
+            if (saved.buf) {
+                NSTEP(9, "no face within %d ms - sending the picture with a person", CONFIG_NODE_FACE_WINDOW_MS);
+                *out = saved;
+                camsvc_release(fb);
+            } else {
+                NSTEP(9, "nobody within %d ms - sending the last picture", CONFIG_NODE_FACE_WINDOW_MS);
+                out_from_fb(out, fb);
+            }
             return true;
         }
 
@@ -186,7 +248,7 @@ static void run_cycle(bool pairing_window)
 
     out_image_t out = {0};                                          /* 9 */
 #ifdef CONFIG_NODE_FACE_DETECT
-    bool have = capture_face_aware(dark, t_wake_us, &out);
+    bool have = capture_smart(dark, t_wake_us, &out);
 #else
     (void)t_wake_us;
     bool have = capture_single(dark, &out);
@@ -212,12 +274,13 @@ static void run_cycle(bool pairing_window)
 
                 for (int attempt = 1; attempt <= 2; attempt++) {    /* 12 */
                     if (ble_link_send_image(out.buf, out.len, out.width, out.height,
-                                            out.flags, out.faces) != ESP_OK) {
+                                            out.flags, out.faces, out.humans) != ESP_OK) {
                         NSTEP(12, "sending FAILED (attempt %d)", attempt);
                         break;
                     }
                     NSTEP(12, "frame sent (attempt %d, %s), waiting for ACK", attempt,
-                          (out.flags & BLE_IMG_FLAG_FACE) ? "FACE DETECTED" : "no face");
+                          (out.flags & BLE_IMG_FLAG_FACE) ? "FACE DETECTED"
+                          : (out.flags & BLE_IMG_FLAG_HUMAN) ? "HUMAN DETECTED" : "no human detected");
                     ble_ack_t ack = ble_link_wait_ack(CONFIG_NODE_BLE_ACK_TIMEOUT_MS);
                     if (ack == BLE_ACK_OK) {
                         NSTEP(12, "ACK received - delivered");
@@ -285,8 +348,8 @@ void app_main(void)
 
 #ifdef CONFIG_NODE_FACE_DETECT
     /* face detection model (loaded once; ~1.5 MB read from flash) */
-    err = face_detect_init();
-    NLOGI(T, "face detector %s", err == ESP_OK ? "ready" : "FAILED to load (pictures go out without a face check)");
+    err = vision_init();
+    NLOGI(T, "person/face detectors %s", err == ESP_OK ? "ready" : "FAILED to load (pictures go out unchecked)");
 #endif
 
     /* 3: BLE self-test: bring the stack up once, read the pairing state, shut it down again */

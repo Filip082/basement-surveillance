@@ -113,17 +113,58 @@ menu "Camera node"
     menu "Face detection"
 
         config NODE_FACE_DETECT
-            bool "Detect faces and mark them with a frame before sending"
+            bool "Detect people / faces and mark them with a frame before sending"
             default y
             help
                 After the wake-up the node takes pictures until a face is found (or the
-                search window is over), draws a frame around the face(s) and sends the
-                picture with a note "face detected". Without a face the last picture is
-                sent with the note "no face". Uses the espressif/human_face_detect model
-                (MSR+MNP, int8, about 1.5 MB in flash). Disable to send one plain picture.
+                search window is over), frames what it found and sends the picture with
+                a status: face detected / human detected / no human detected.
+                Uses espressif/pedestrian_detect and espressif/human_face_detect (int8,
+                a few MB of flash in total). Disable to send one plain picture.
+
+        config NODE_PERSON_DETECT
+            bool "Look for a person first, check for a face only when one is found"
+            default y
+            depends on NODE_FACE_DETECT
+            help
+                Order: person? no -> next picture; yes -> face? yes -> send "face detected";
+                no -> keep this picture and try again until the window is over, then send it
+                as "human detected". Off: only faces are searched (status face / none).
+
+        config NODE_FACE_WITHOUT_PERSON
+            bool "Also check for a face when no person was found"
+            default n
+            depends on NODE_PERSON_DETECT
+            help
+                The person model is trained on whole bodies: a face close to the camera or a
+                partly visible person may be missed by it, and the face check would then never
+                run. Turn this on to run the face check on every picture (about 40 ms more).
+
+        config NODE_PERSON_MIN_SCORE_PCT
+            int "Minimum person confidence (percent)"
+            default 50
+            range 10 95
+            depends on NODE_PERSON_DETECT
+
+        config NODE_FACE_MIN_SCORE_PCT
+            int "Minimum face confidence (percent)"
+            default 50
+            range 10 95
+            depends on NODE_FACE_DETECT
+
+        config NODE_PERSON_DRAW_BOX
+            bool "Draw a frame around people when no face was found"
+            default y
+            depends on NODE_PERSON_DETECT
+
+        config NODE_PERSON_BOX_COLOR
+            hex "Person frame colour (0xRRGGBB)"
+            default 0xFFFF00
+            range 0x000000 0xFFFFFF
+            depends on NODE_PERSON_DRAW_BOX
 
         config NODE_FACE_BOX_COLOR
-            hex "Frame colour (0xRRGGBB)"
+            hex "Face frame colour (0xRRGGBB)"
             default 0x00FF00
             range 0x000000 0xFFFFFF
             depends on NODE_FACE_DETECT
