@@ -39,5 +39,19 @@ bool take_image(void);
  * take_image() is running. */
 const struct stored_image *get_image(void);
 
+struct battery_info {
+	uint8_t percent;        /* 0..100 */
+	uint16_t battery_mv;    /* battery voltage, calculated by the camera node */
+	uint16_t adc_mv;        /* voltage at the camera node's ADC pin */
+};
+
+/*
+ * Ask the camera node for its battery level: a long wake pulse (APP_BATTERY_WAKE_PULSE_MS)
+ * tells it to measure and send the battery report instead of a picture. Bluetooth is on
+ * only while this runs. Returns true and fills *out when the report arrived; it is also
+ * logged ("BATTERY: 73 % ..."). Blocks for about 1-5 s.
+ */
+bool read_battery(struct battery_info *out);
+
 /* Forget the paired camera (the camera node keeps its own record; reset it too). */
 void camera_node_forget_pairing(void);

@@ -13,5 +13,6 @@
 /* Configure the pin as an output in its inactive (idle) state. Returns 0 or -errno. */
 int cam_wake_init(void);
 
-/* Drive the line active for CONFIG_APP_CAM_WAKE_PULSE_MS, then idle again. Blocks. */
-void cam_wake_pulse(void);
+/* Drive the line active for `ms`, then idle again. Blocks.
+ * The camera node tells the request by the length: short = picture, long = battery. */
+void cam_wake_pulse(unsigned int ms);

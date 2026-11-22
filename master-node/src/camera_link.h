@@ -5,7 +5,8 @@
  *
  * One call, camlink_receive_image(), runs a complete session:
  *   scan -> connect -> pair/encrypt -> discover service -> subscribe ->
- *   receive picture into image_store -> ACK -> disconnect.
+ *   receive ONE message (a picture into image_store, or a battery report) -> ACK -> disconnect.
+ * Which one arrives depends on the wake pulse sent to the camera; camlink_last_kind() says.
  * The protocol is the one of the camera firmware (see README "Protocol").
  */
 #pragma once
@@ -56,6 +57,25 @@ void camlink_forget_all(void);
  * can be read with image_store_get().
  */
 camlink_result_t camlink_receive_image(bool pairing, uint32_t find_timeout_ms);
+
+/* What the last successful session delivered. */
+enum camlink_kind {
+	CAMLINK_KIND_NONE,
+	CAMLINK_KIND_IMAGE,     /* picture, in image_store */
+	CAMLINK_KIND_BATTERY,   /* battery report, see camlink_last_battery() */
+};
+
+struct camlink_battery {
+	uint8_t percent;        /* 0..100 */
+	uint16_t battery_mv;    /* battery voltage the camera calculated */
+	uint16_t adc_mv;        /* voltage at the camera's ADC pin */
+};
+
+/* Kind of the data delivered by the last camlink_receive_image() (valid on CAMLINK_OK). */
+enum camlink_kind camlink_last_kind(void);
+
+/* The last battery report (valid when camlink_last_kind() == CAMLINK_KIND_BATTERY). */
+struct camlink_battery camlink_last_battery(void);
 
 /* Readable name of a result, for logs. */
 const char *camlink_result_str(camlink_result_t r);

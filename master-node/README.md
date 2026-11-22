@@ -22,7 +22,12 @@ if (take_image()) {                      // wake the camera, receive its picture
 }
 ```
 
-`take_image()`:
+`read_battery(&info)` - asks the camera node for its battery level: a **long** wake pulse (`APP_BATTERY_WAKE_PULSE_MS`,
+300 ms; the camera treats pulses longer than its `NODE_BATTERY_REQUEST_MS` = 200 ms as a battery request), then it receives the
+battery report over BLE, logs `BATTERY: 73 % (7620 mV battery, 1905 mV at the camera's ADC pin)`, turns Bluetooth off and returns
+`true` with `info->percent`, `battery_mv`, `adc_mv`. Needs a paired camera (call `take_image()` once first).
+
+`take_image()` (uses a **short** pulse, `APP_IMAGE_WAKE_PULSE_MS` = 50 ms):
 1. switches Bluetooth on (`bt_enable`, loads the stored pairing from flash),
 2. pulls the camera's wake line LOW for 100 ms,
 3. scans for the paired camera, connects, encrypts with the stored key, receives the
@@ -34,7 +39,7 @@ if (take_image()) {                      // wake the camera, receive its picture
 the next `take_image()`; do not call it while `take_image()` runs.
 
 `src/main.c` is only an example caller: it sleeps until the trigger input (Button 1 on the DK)
-wakes the nRF, calls `take_image()` and then `get_image()`. Replace it with the product's own
+wakes the nRF and calls `take_image()` + `get_image()`; **Button 2** calls `read_battery()` and logs the result. Replace it with the product's own
 main loop; the trigger code is the only other thing in there.
 
 Details:
@@ -82,7 +87,7 @@ master_node: image ready: 41234 bytes
 
 | nRF5340 DK                | Camera node              |
 |---------------------------|--------------------------|
-| P1.04 (`cam-wake-gpios`)  | GPIO10 (wake input)      |
+| P1.04 (`cam-wake-gpios`)  | GPIO10 (wake input; short LOW pulse = picture, long = battery) |
 | GND                       | GND                      |
 
 The camera's GPIO10 has an internal pull-up and wakes on LOW. The DK drives push-pull
@@ -99,7 +104,7 @@ Camera node settings: `NODE_WAKE_ACTIVE_LOW=y`, `NODE_BLE_DEVICE_NAME` = `APP_CA
 | `west.yml`                                 | Pins Zephyr and the modules we fetch                           |
 | `prj.conf`                                 | Kconfig: logging, Bluetooth central, bonding, MTU, CRC         |
 | `Kconfig`                                  | Application options (`CONFIG_APP_*`)                           |
-| `boards/nrf5340dk_nrf5340_cpuapp.overlay`  | DK: trigger = Button 1, wake pin = P1.04                       |
+| `boards/nrf5340dk_nrf5340_cpuapp.overlay`  | DK: Button 1 = picture, Button 2 = battery, wake pin = P1.04                       |
 | `boards/xiao_ble.overlay` / `.conf`        | XIAO: LoRa wiring, placeholder trigger/wake pins, LoRa on      |
 | `Kconfig.sysbuild`, `sysbuild.cmake`       | nRF5340 only: also builds the network-core Bluetooth controller|
 | `sysbuild/hci_ipc.conf`                    | Options for that network-core image                            |
@@ -188,6 +193,7 @@ you can press Button 1 inside that window instead.
 * `camera_node_init()` - initialises the link module and the wake pin. Bluetooth stays off.
 * `take_image()` - radio on, decide pairing mode (no bond) or paired mode, wake pulse, run the
   session, one automatic re-pair if the camera lost the bond, radio off, copy the picture handle.
+* `read_battery(&info)` - radio on, long wake pulse, one session, expects a battery report (`camlink_last_kind()`), radio off.
 * `get_image()` - pointer to the last valid picture or `NULL`.
 * `camera_node_forget_pairing()` - deletes the stored bond (radio on briefly).
 
@@ -224,6 +230,7 @@ only starts the scan and waits on a semaphore.
 * `discover_start()` / `discover_cb()` - finds the camera service by UUID and its Image and Control
   characteristic handles, then `subscribe_start()` subscribes to Image notifications (CCC descriptor
   found automatically). The camera only sends after this subscription.
+* `rx_battery()` - parses the battery report, logs it, queues the ACK; `camlink_last_kind()` / `camlink_last_battery()` return it.
 * `notify_cb()` -> `rx_start()` / `rx_data()` / `rx_end()` - protocol parser:
   START (allocate in `image_store`), DATA (sequence check, append, progress log),
   END (compare size + CRC32; good -> commit + queue ACK, bad -> abort + queue NAK).
@@ -242,11 +249,12 @@ only starts the scan and waits on a semaphore.
 ### `src/cam_wake.c`
 
 * `cam_wake_init()` - output in the idle (inactive) state.
-* `cam_wake_pulse()` - active for `APP_CAM_WAKE_PULSE_MS`, then idle.
+* `cam_wake_pulse()` - active for `APP_IMAGE_WAKE_PULSE_MS`, `APP_BATTERY_WAKE_PULSE_MS`, then idle.
 
 ## Protocol (same as the camera node)
 
 Service `dfa10001-5b3c-4f6d-9e21-0a4c7b8d1e00`
+* Battery report (notify on Image): `04 percent8 battery_mV16 pin_mV16`, ACKed through Control like a picture
 * Control `dfa10002-...` (write): `01` = ACK picture received, `02` = please resend
 * Image   `dfa10003-...` (notify): `01 len32 w16 h16 flags8 faces8 humans8` START (flags bit0 = face detected, bit1 = person
   detected; the last three bytes are optional), `02 seq16 bytes` DATA, `03 crc32` END
@@ -258,7 +266,7 @@ The camera only sends after the link is encrypted AND the Image characteristic i
 
 `west build -t menuconfig` -> "master-node application", or put `CONFIG_APP_xxx=...` into `prj.conf`:
 `APP_CAMERA_NAME`, `APP_IMAGE_BUF_SIZE`, `APP_SESSION_TIMEOUT_S`, `APP_TRANSFER_TIMEOUT_S`,
-`APP_CAM_WAKE_PULSE_MS`, `APP_PROGRESS_LOG_BYTES`, `APP_AUTO_REPAIR`. **Logs off** (final build): `CONFIG_LOG=n`.
+`APP_IMAGE_WAKE_PULSE_MS`, `APP_BATTERY_WAKE_PULSE_MS`, `APP_PROGRESS_LOG_BYTES`, `APP_AUTO_REPAIR`. **Logs off** (final build): `CONFIG_LOG=n`.
 
 ## Porting DK -> XIAO nRF52840
 

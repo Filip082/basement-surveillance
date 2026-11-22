@@ -32,10 +32,10 @@ int cam_wake_init(void)
 	return 0;
 }
 
-void cam_wake_pulse(void)
+void cam_wake_pulse(unsigned int ms)
 {
-	LOG_INF("waking the camera node (%d ms pulse)", CONFIG_APP_CAM_WAKE_PULSE_MS);
+	LOG_INF("waking the camera node (%u ms pulse)", ms);
 	gpio_pin_set_dt(&wake, 1);
-	k_msleep(CONFIG_APP_CAM_WAKE_PULSE_MS);
+	k_msleep(ms);
 	gpio_pin_set_dt(&wake, 0);
 }

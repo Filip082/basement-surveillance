@@ -37,9 +37,11 @@ static const struct bt_uuid_128 uuid_img =
 #define IMG_FLAG_HUMAN 0x02  /* flags bit1: a person was detected */
 #define PKT_DATA  0x02   /* [02][seq u16][bytes ...]                      */
 #define PKT_END   0x03   /* [03][crc32 u32]                               */
+#define PKT_BATTERY 0x04 /* [04][percent u8][battery mV u16][pin mV u16]  battery report */
 
 #define CTRL_ACK 0x01    /* write to the Control characteristic: picture received */
 #define CTRL_NAK 0x02    /* ... : resend please */
+#define CTRL_READY 0x03  /* ... : subscribed, I am listening - camera may start sending */
 
 /* After the link is encrypted the camera is the one that normally starts pairing
  * (it sends a Security Request on connect). If nothing happened within this time we
@@ -87,6 +89,8 @@ static struct {
 	uint32_t rx_next_log;
 	int64_t rx_t0;
 	uint8_t ack_value;
+	enum camlink_kind kind;       /* what this session delivered */
+	struct camlink_battery battery;
 
 	struct k_sem finished;        /* given once when the session result is known */
 	struct k_sem disconnected;    /* given when the link is down */
@@ -97,6 +101,16 @@ static struct {
 /* ------------------------------------------------------------------------ */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------ */
+
+enum camlink_kind camlink_last_kind(void)
+{
+	return s.kind;
+}
+
+struct camlink_battery camlink_last_battery(void)
+{
+	return s.battery;
+}
 
 const char *camlink_result_str(camlink_result_t r)
 {
@@ -266,7 +280,10 @@ static void subscribed_cb(struct bt_conn *conn, uint8_t err,
 		return;
 	}
 	s.phase = PH_RECEIVING;
-	LOG_INF("subscribed - waiting for the picture");
+	LOG_INF("subscribed - waiting for the message from the camera");
+	/* tell the camera we really listen now (it must not send before this) */
+	s.ack_value = CTRL_READY;
+	k_work_submit(&s.ack_work);
 }
 
 static uint8_t notify_cb(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
@@ -379,8 +396,12 @@ static void ack_work_fn(struct k_work *work)
 	int err = bt_gatt_write_without_response(conn, s.h_ctrl, &v, 1, false);
 
 	if (err) {
-		LOG_ERR("could not write %s: %d", v == CTRL_ACK ? "ACK" : "NAK", err);
+		LOG_ERR("could not write control byte 0x%02x: %d", v, err);
 		finish(CAMLINK_FAILED);
+		return;
+	}
+	if (v == CTRL_READY) {
+		LOG_INF("READY sent to the camera");
 		return;
 	}
 	LOG_INF("%s sent to the camera", v == CTRL_ACK ? "ACK" : "NAK (resend requested)");
@@ -461,12 +482,29 @@ static void rx_end(const uint8_t *d, uint16_t len)
 		LOG_INF("TRANSMISSION END: %u bytes saved in RAM, CRC32 %08x OK, %lld ms (%u B/s)",
 			got, crc, (long long)ms, ms > 0 ? (unsigned int)((int64_t)got * 1000 / ms) : 0);
 		s.ack_value = CTRL_ACK;
+		s.kind = CAMLINK_KIND_IMAGE;
 	} else {
 		LOG_ERR("TRANSMISSION END with errors: saved %u of %u bytes, CRC %08x vs %08x%s",
 			got, want, crc, crc_rx, s.rx_error ? ", packets lost" : "");
 		image_store_abort();
 		s.ack_value = CTRL_NAK;
 	}
+	k_work_submit(&s.ack_work);
+}
+
+static void rx_battery(const uint8_t *d, uint16_t len)
+{
+	if (len < 6) {
+		LOG_WRN("short battery packet (%u bytes)", len);
+		return;
+	}
+	s.battery.percent = d[1];
+	s.battery.battery_mv = sys_get_le16(&d[2]);
+	s.battery.adc_mv = sys_get_le16(&d[4]);
+	s.kind = CAMLINK_KIND_BATTERY;
+	LOG_INF("BATTERY: %u %% (%u mV battery, %u mV at the camera's ADC pin)", s.battery.percent,
+		s.battery.battery_mv, s.battery.adc_mv);
+	s.ack_value = CTRL_ACK;
 	k_work_submit(&s.ack_work);
 }
 
@@ -487,6 +525,7 @@ static uint8_t notify_cb(struct bt_conn *conn, struct bt_gatt_subscribe_params *
 	case PKT_START: rx_start(d, length); break;
 	case PKT_DATA:  rx_data(d, length);  break;
 	case PKT_END:   rx_end(d, length);   break;
+	case PKT_BATTERY: rx_battery(d, length); break;
 	default:
 		LOG_WRN("unknown packet type 0x%02x", d[0]);
 	}
@@ -670,6 +709,7 @@ camlink_result_t camlink_receive_image(bool pairing, uint32_t find_timeout_ms)
 	s.busy = true;
 	s.pairing = pairing;
 	s.result = CAMLINK_FAILED;
+	s.kind = CAMLINK_KIND_NONE;
 	s.rx_active = false;
 	s.h_img = s.h_ctrl = 0;
 	k_sem_reset(&s.finished);

@@ -37,13 +37,21 @@ config APP_TRANSFER_TIMEOUT_S
 	default 30
 	range 5 300
 
-config APP_CAM_WAKE_PULSE_MS
-	int "Length of the wake-up pulse sent to the camera node (ms)"
-	default 100
+config APP_IMAGE_WAKE_PULSE_MS
+	int "Wake pulse for a PICTURE request (ms)"
+	default 50
 	range 5 2000
 	help
-	  The camera wakes on the LEVEL of its wake pin, so the line has to stay active
-	  for a moment. It then waits for the line to be released again.
+	  The camera wakes on the LEVEL of its wake pin. A pulse SHORTER than the camera's
+	  NODE_BATTERY_REQUEST_MS (200 ms) asks for a picture.
+
+config APP_BATTERY_WAKE_PULSE_MS
+	int "Wake pulse for a BATTERY request (ms)"
+	default 300
+	range 5 5000
+	help
+	  A pulse LONGER than the camera's NODE_BATTERY_REQUEST_MS (200 ms) asks for the
+	  battery level instead of a picture.
 
 config APP_PROGRESS_LOG_BYTES
 	int "Log the received byte count every this many bytes"
