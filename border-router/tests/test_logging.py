@@ -109,7 +109,11 @@ class ReceiveLoggingTests(unittest.TestCase):
         radio = MagicMock()
         radio.begin.return_value = True
         radio.request.return_value = True
-        radio.getIrqStatus.return_value = 1
+        radio.IRQ_RX_DONE = 0x0002
+        radio.IRQ_HEADER_ERR = 0x0020
+        radio.IRQ_CRC_ERR = 0x0040
+        radio.IRQ_TIMEOUT = 0x0200
+        radio.getIrqStatus.return_value = radio.IRQ_RX_DONE
         radio.wait.return_value = True
         radio.status.return_value = radio.STATUS_RX_DONE
         radio.available.return_value = 3

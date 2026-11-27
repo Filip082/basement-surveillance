@@ -273,6 +273,10 @@ class ContractTests(unittest.TestCase):
         radio = MagicMock()
         radio.begin.return_value = True
         radio.request.return_value = True
+        radio.IRQ_RX_DONE = 0x0002
+        radio.IRQ_HEADER_ERR = 0x0020
+        radio.IRQ_CRC_ERR = 0x0040
+        radio.IRQ_TIMEOUT = 0x0200
         radio.getIrqStatus.return_value = 0
         radio.endPacket.return_value = True
         radio.wait.return_value = False
@@ -292,7 +296,7 @@ class ContractTests(unittest.TestCase):
         radio.setLoRaModulation.assert_called_once_with(12, 125000, 5, True)
         radio.setTxPower.assert_called_once_with(14, radio.TX_POWER_SX1262)
         radio.setTxParams.assert_not_called()
-        self.assertEqual(radio.setStandby.call_count, 2)
+        self.assertEqual(radio.setStandby.call_count, 3)
         controller.complete_attempt.assert_called_once()
         radio.end.assert_called_once()
         gpiod.request_lines.return_value.release.assert_called_once()

@@ -19,6 +19,7 @@ from .feedback import FeedbackController, lora_airtime_seconds
 from .protocol import MAX_RADIO_PAYLOAD, ProtocolError
 
 LOG = logging.getLogger(__name__)
+_STATUS_LOG_INTERVAL = 15.0
 
 
 @dataclass(frozen=True)
@@ -229,7 +230,6 @@ class SX1262Transceiver:
             # Match the LDRO assumption in lora_airtime_seconds at slow symbol rates.
             ldro = (2**cfg.spreading_factor) / cfg.bandwidth >= 0.016
             radio.setLoRaModulation(cfg.spreading_factor, cfg.bandwidth, cfg.coding_rate, ldro)
-            radio.setLoRaPacket(radio.HEADER_EXPLICIT, 12, MAX_RADIO_PAYLOAD, True, False)
             radio.setSyncWord(cfg.sync_word)
             rf_sw.output(1)
             LOG.info(
@@ -241,24 +241,53 @@ class SX1262Transceiver:
                 cfg.sync_word,
             )
 
+            terminal_rx_irqs = (
+                radio.IRQ_RX_DONE | radio.IRQ_TIMEOUT | radio.IRQ_HEADER_ERR | radio.IRQ_CRC_ERR
+            )
             rx_started = False
+            rx_packets = header_errors = crc_errors = 0
+            last_rx = None
+            next_status = time.monotonic() + _STATUS_LOG_INTERVAL
+            next_header_warning = next_crc_warning = 0.0
             while not stop_requested():
+                now = time.monotonic()
                 if not rx_started:
                     rf_sw.output(1)
-                    if radio.request():
-                        rx_started = True
-                    else:
-                        time.sleep(cfg.poll_interval)
-                        continue
+                    # A PHY error can leave the chip in RX. LoRaRF request()
+                    # refuses an already receiving chip, so explicitly stop RX
+                    # before rearming. request() clears IRQs and cached status.
+                    radio.setStandby(radio.STANDBY_RC)
+                    # endPacket() changes the payload limit to the ACK/NACK length.
+                    # Restore full-size, explicit-header RX after every transmit.
+                    radio.setLoRaPacket(radio.HEADER_EXPLICIT, 12, MAX_RADIO_PAYLOAD, True, False)
+                    if not radio.request():
+                        raise RuntimeError("SX1262 RX request rejected after standby; check SPI/BUSY")
+                    rx_started = True
 
-                if radio.getIrqStatus() != 0:
-                    # LoRaRF wait() finalizes RX metadata. Do not call until an IRQ
-                    # is observed; otherwise it busy-loops inside upstream driver.
+                irq_status = radio.getIrqStatus()
+                if now >= next_status:
+                    LOG.info(
+                        "LoRa listening rx_packets=%d header_errors=%d crc_errors=%d "
+                        "last_rx=%s mode=%#04x irq=%#06x",
+                        rx_packets,
+                        header_errors,
+                        crc_errors,
+                        "never" if last_rx is None else f"{now - last_rx:.1f}s ago",
+                        radio.getMode(),
+                        irq_status,
+                    )
+                    next_status = now + _STATUS_LOG_INTERVAL
+
+                if irq_status & terminal_rx_irqs:
+                    # Finalize only completed/failed RX. A preamble or valid-header
+                    # IRQ is progress, not a packet; leave that reception running.
                     if radio.wait(0.25):
                         state = radio.status()
                         if state == radio.STATUS_RX_DONE:
                             raw = radio.get(radio.available())
                             rssi, snr = radio.packetRssi(), radio.snr()
+                            rx_packets += 1
+                            last_rx = now
                             LOG.info("LoRa RX bytes=%d rssi=%s dBm snr=%s dB", len(raw), rssi, snr)
                             LOG.debug("LoRa RX raw=%s", raw.hex())
                             try:
@@ -266,12 +295,30 @@ class SX1262Transceiver:
                             except ProtocolError as exc:
                                 LOG.warning("Rejected received frame: %s", exc)
                         elif state == radio.STATUS_HEADER_ERR:
-                            LOG.warning("PHY frame header error")
+                            header_errors += 1
+                            if now >= next_header_warning:
+                                LOG.warning(
+                                    "PHY frame header error irq=%#06x total=%d; rearming RX",
+                                    irq_status,
+                                    header_errors,
+                                )
+                                next_header_warning = now + _STATUS_LOG_INTERVAL
                         elif state == radio.STATUS_CRC_ERR:
-                            LOG.warning("PHY frame CRC error")
+                            crc_errors += 1
+                            if now >= next_crc_warning:
+                                LOG.warning(
+                                    "PHY frame CRC error irq=%#06x total=%d; rearming RX",
+                                    irq_status,
+                                    crc_errors,
+                                )
+                                next_crc_warning = now + _STATUS_LOG_INTERVAL
                         else:
-                            LOG.debug("RX status: %s", state)
+                            LOG.debug("RX status=%s irq=%#06x; rearming RX", state, irq_status)
+                    else:
+                        LOG.warning("LoRa RX IRQ=%#06x did not finalize; rearming RX", irq_status)
                     rx_started = False
+                    if irq_status & (radio.IRQ_HEADER_ERR | radio.IRQ_CRC_ERR):
+                        time.sleep(cfg.poll_interval)
                     continue
 
                 pending = controller.poll()

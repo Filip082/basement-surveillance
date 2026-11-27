@@ -90,6 +90,21 @@ Sent ACK device=1 kind=ENTRY id=33
 
 The numbers are illustrative. `LoRa RX` confirms a PHY-valid radio packet even if its application framing is rejected. DATA logs identify each received fragment with a one-based position; protocol fragment indices remain zero-based. The completion log confirms whole-body CRC validation and durable storage. END queues feedback, and `Sent ACK` confirms a radio transmit attempt completed. Raw packet hex is available with `--log-level DEBUG`.
 
+While no packets arrive, the radio loop prints its status every 15 seconds:
+
+```text
+LoRa listening rx_packets=0 header_errors=0 crc_errors=0 last_rx=never mode=0x50 irq=0x0000
+```
+
+This confirms that the polling loop is running; it does not confirm a working RF link. `mode=0x50` means the SX1262 reports RX mode. Counters reset when the process restarts. `rx_packets` counts PHY-valid packets, including those later rejected by the application protocol. Header/CRC errors are counted separately, with each warning limited to once per 15 seconds. The receiver returns to standby before rearming after an error, and restores its full payload limit after sending feedback.
+
+If the master reports `ENTRY`, repeated `END attempt` messages and `Feedback timeout`, its sender is running but has not received a valid ACK/NACK. With the default configuration each feedback wait lasts at least 20 seconds and there are up to eight END attempts; the one-second demo interval starts after that session finishes. For a silent link:
+
+1. Check that only one router process/container owns the radio, and compare its status counters while the master sends.
+2. If `rx_packets` remains zero, compare both peers' actual settings: 868100000 Hz, SF7, 125000 Hz bandwidth, coding rate 4/5, raw sync word `0x0741`, explicit headers, PHY CRC enabled, 12-symbol preamble and normal IQ. Check power, ground, antennas, RF_SW and the SPI/control wiring. PHY errors alone do not identify which setting or connection is wrong.
+3. If `LoRa RX` appears with `Rejected received frame`, the PHY worked; check the flashed sender's wire protocol version and framing. If DATA arrives without END, no ACK/NACK is scheduled.
+4. If the router reports `Sent ACK` but the master still times out, inspect the return radio path and the master's receive settings. An ACK log confirms completion of the router's transmit attempt, not receipt by the master.
+
 For the normal service in the background, while leaving dependencies stopped:
 
 ```bash
