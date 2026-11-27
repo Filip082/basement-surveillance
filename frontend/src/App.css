@@ -988,7 +988,8 @@ main {
 }
 
 .date-filter-warning {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
 }
