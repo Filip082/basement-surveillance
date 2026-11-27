@@ -76,7 +76,7 @@ The router can receive fragments, persist complete messages and send ACK/NACK wi
 docker compose --profile hardware run --rm --no-deps --build border-router --no-http
 ```
 
-`--no-deps` skips the backend/database startup dependency, and `--no-http` disables the HTTP worker. The radio still uses the mapped SPI/GPIO devices, the persisted SQLite volume and the normal duty-cycle limiter. Stop the test with Ctrl+C. When the normal service is started later without `--no-http`, it forwards messages retained during the test.
+`--no-deps` skips the backend/database startup dependency, and `--no-http` disables the HTTP worker. The radio keeps its device mappings and SQLite persistence. The duty-cycle limiter is temporarily disabled by default. Stop the test with Ctrl+C. When the normal service is started later without `--no-http`, it forwards messages retained during the test.
 
 At the default INFO log level, expect:
 
@@ -118,7 +118,7 @@ The GPIO mapping matches the default `GPIO_CHIP=0`. If your Pi uses another chip
 
 ### Change router settings in Compose
 
-The root `.env` supplies Compose interpolation such as `PORT`. Radio variables in the configuration table below must also be passed into the router container: adding `LORA_SF` or `LORA_DUTY` to `.env` alone does not forward them through the current service definition. Add settings to the service's `environment` mapping, or create a repository-root `docker-compose.override.yml`, for example:
+The root `.env` supplies Compose interpolation such as `PORT` and `LORA_DUTY`. The router currently defaults to `LORA_DUTY=0` for testing; set `LORA_DUTY=0.01` there to restore 1%. Other radio variables in the configuration table below must also be passed into the router container: adding `LORA_SF` to `.env` alone does not forward it through the current service definition. Add settings to the service's `environment` mapping, or create a repository-root `docker-compose.override.yml`, for example:
 
 ```yaml
 services:
@@ -127,7 +127,7 @@ services:
       LORA_FREQ: "868100000"
       LORA_SF: "7"
       LORA_BW: "125000"
-      LORA_DUTY: "0.01"
+      LORA_DUTY: "0"  # Temporary test setting; use "0.01" to restore 1%.
 ```
 
 Apply configuration or source changes from the repository root with:
@@ -179,16 +179,18 @@ Both peers must use the same frequency, modulation, sync word, framing and low-d
 | Coding-rate denominator | `--cr` | `LORA_CR` | `5` (4/5) |
 | SX1262 sync word | `--sync-word` | `LORA_SYNC_WORD` | `0x0741` |
 | Nominal TX power, dBm | `--tx-power` | `LORA_TX_POWER` | `14` |
-| TX duty-cycle fraction | `--duty-cycle` | `LORA_DUTY` | `0.01` (1%) |
+| TX duty-cycle fraction | `--duty-cycle` | `LORA_DUTY` | `0` (disabled for testing) |
 | RX quiet period, seconds | `--quiet-seconds` | — | `0.35` |
 
 Other defaults: explicit LoRa headers, PHY CRC enabled, 12-symbol preamble and normal IQ. Supported bandwidths are 125/250/500 kHz; coding rates are 4/5 through 4/8. The pinned driver offers nominal SX1262 PA presets of 14, 17, 20 and 22 dBm. Its PA configuration and TX register setting work as a pair; do not overwrite only the TX register. Hardware capability does not imply permission to transmit at those powers.
 
 For the default **868.0–868.6 MHz** sub-band, [ERC Recommendation 70-03](https://docdb.cept.org/document/845) describes a 25 mW ERP limit and a duty-cycle option of at most 1%, with alternative access techniques subject to their own requirements. National implementation still applies. The 1% setting is not appropriate for every European 868 MHz sub-band; for example, 868.7–869.2 MHz has a 0.1% duty-cycle option. Carrier bandwidth must fit the chosen sub-band. A nominal 14 dBm transmitter setting alone does not determine ERP: include antenna gain and losses.
 
-The router retains the conservative **1% TX limiter by default**. It reserves estimated airtime plus a small ramp/timing margin in SQLite **before** each ACK/NACK attempt, counts failed attempts, enforces a rolling one-hour budget and waits between transmissions. Restarting with the same database retains this accounting. This guards this router's feedback only; the sender needs its own airtime accounting. The implementation does not enforce ERP, national rules or a frequency-dependent regulatory profile.
+The temporary **test default is no TX duty-cycle limiter** (`0`) in the CLI, controller and Compose service. It bypasses saved airtime history, so an old SQLite reservation does not delay a test ACK/NACK. The RX quiet period remains 350 ms for half-duplex switching.
 
-To **disable the implemented airtime restrictions completely**, use `--duty-cycle 0` or `LORA_DUTY=0` (pass `LORA_DUTY: "0"` into the router's Compose `environment` when running in Docker). The explanatory comments are in `FeedbackController.reserve_transmit()` in [src/feedback.py](src/feedback.py). Zero bypasses both the rolling budget and post-TX off-time, including existing saved reservations. It leaves the protocol's half-duplex quiet period in place. Use this only where unrestricted operation is permitted, such as an appropriate conducted or shielded test setup. Setting the fraction to `1` still performs accounting; zero is the complete bypass.
+The limiter remains implemented. **Restore the 1% profile** with `--duty-cycle 0.01`, or `LORA_DUTY=0.01` in the repository-root `.env`, then recreate the router container. When enabled, it reserves estimated airtime plus a small ramp/timing margin in SQLite before each ACK/NACK attempt, counts failed attempts, enforces a rolling one-hour budget and retains accounting across restarts. This guards the router's feedback only; the sender needs independent settings. To restore the master node too, set both `CONFIG_APP_LORA_DUTY_PERMILLE=10` and `CONFIG_APP_ROUTER_DUTY_PERMILLE=10`, rebuild and flash.
+
+To keep **all implemented airtime restrictions disabled** during testing, use `--duty-cycle 0` or `LORA_DUTY=0`. The explanatory comments are in `FeedbackController.reserve_transmit()` in [src/feedback.py](src/feedback.py). Zero bypasses both the rolling budget and post-TX off-time, including existing saved reservations. It leaves the protocol's half-duplex quiet period in place. Use this only where unrestricted operation is permitted, such as an appropriate conducted or shielded test setup. Setting the fraction to `1` still performs accounting; zero is the complete bypass.
 
 ## Message delivery contract
 

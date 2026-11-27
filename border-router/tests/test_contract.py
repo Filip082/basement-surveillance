@@ -242,13 +242,14 @@ class ContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             store = MessageStore(Path(directory) / "router.sqlite3")
             try:
-                controller = FeedbackController(store, quiet_seconds=0)
+                controller = FeedbackController(store, quiet_seconds=0, duty_cycle=0.01)
                 frame = decode_frame(encode_message(Kind.ENTRY, 1, 1, b"{}")[0])
                 controller.on_frame(encode_control(Kind.END, frame))
                 feedback = controller.poll()
                 self.assertTrue(controller.reserve_transmit(feedback))
                 self.assertFalse(controller.reserve_transmit(feedback))
-                unrestricted = FeedbackController(store, duty_cycle=0)
+                unrestricted = FeedbackController(store)
+                self.assertEqual(unrestricted.duty_cycle, 0)
                 with patch.object(
                     store, "reserve_airtime", side_effect=AssertionError("must bypass")
                 ):

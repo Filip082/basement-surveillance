@@ -411,7 +411,9 @@ class SenderTests(unittest.TestCase):
             self.assertLess((spacing - 1) * duty, airtime * 1000)
             self.assertGreaterEqual(spacing, airtime)
         self.assertEqual(self.lib.bs_tx_spacing_ms(71, 10), 7100)
-        for airtime, duty in ((0, 10), (71, 0), (71, 1001)):
+        self.assertEqual(self.lib.bs_tx_spacing_ms(71, 0), 71)
+        self.assertEqual(self.lib.bs_tx_spacing_ms(0xFFFFFFFF, 0), 0xFFFFFFFF)
+        for airtime, duty in ((0, 10), (0, 0), (71, 1001)):
             self.assertEqual(self.lib.bs_tx_spacing_ms(airtime, duty), 0)
 
     def test_crc_matches_zlib_known_and_binary_vectors(self):

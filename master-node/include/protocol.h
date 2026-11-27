@@ -16,26 +16,49 @@
 #define BS_MESSAGE_MAX 1000000U
 #define BS_FRAGMENT_MAX 10000U
 
+/**
+ * @brief Packet kinds carried in the version 1 wire header.
+ *
+ * ENTRY, IMAGE and TELEMETRY carry DATA fragments. ACK, NACK and END
+ * reference a whole message and carry its original DATA kind in their body.
+ * These numeric values are part of the wire contract and must remain stable.
+ */
 enum bs_kind {
-	BS_ENTRY = 1, BS_IMAGE = 2, BS_TELEMETRY = 3,
-	BS_ACK = 4, BS_NACK = 5, BS_END = 6,
+	BS_ENTRY = 1,     /**< DATA containing part of a UTF-8 entry-event JSON object. */
+	BS_IMAGE = 2,     /**< DATA containing part of a raw JPEG image. */
+	BS_TELEMETRY = 3, /**< DATA containing part of a UTF-8 telemetry JSON object. */
+	BS_ACK = 4,       /**< Router confirms durable receipt of the complete message. */
+	BS_NACK = 5,      /**< Router requests up to BS_NACK_MAX missing DATA indices. */
+	BS_END = 6,       /**< Sender ends a DATA round and requests whole-message feedback. */
 };
 
-/** Immutable metadata for one send session; never serialize this native struct directly. */
+/**
+ * @brief Stable message identity, checksum and fragmentation plan for a send session.
+ *
+ * Initialize with bs_message_init() and retain unchanged across retransmissions.
+ * This native C layout can contain padding; serialize through the protocol encoders,
+ * never by copying the struct directly into a radio packet.
+ */
 struct bs_message {
-	uint32_t message_id;
-	uint32_t total_size;
-	uint32_t crc32;
-	uint16_t device_id;
-	uint16_t count;
-	uint16_t part_size;
-	uint8_t kind;
+	uint32_t message_id; /**< Application message ID; all retries reuse this value. */
+	uint32_t total_size; /**< Complete nonempty application body length in bytes. */
+	uint32_t crc32;      /**< CRC32/ISO-HDLC of the complete body, matching zlib.crc32(). */
+	uint16_t device_id;  /**< Provisioned identity of the sending node. */
+	uint16_t count;      /**< Total distinct DATA fragments expected by the receiver. */
+	uint16_t part_size;  /**< Local DATA payload limit, 1..BS_PART_MAX; not a wire field. */
+	uint8_t kind;        /**< Original DATA category: BS_ENTRY, BS_IMAGE or BS_TELEMETRY. */
 };
 
+/**
+ * @brief Validated whole-message ACK or bounded missing-fragment NACK.
+ *
+ * Output is valid only after bs_decode_feedback() returns zero. The decoder has
+ * already checked that all message metadata matches the pending bs_message.
+ */
 struct bs_feedback {
-	uint16_t missing[BS_NACK_MAX];
-	uint8_t missing_count;
-	uint8_t kind;
+	uint16_t missing[BS_NACK_MAX]; /**< Ascending, unique, zero-based missing DATA indices. */
+	uint8_t missing_count;        /**< Valid array entries: zero for ACK, 1..BS_NACK_MAX for NACK. */
+	uint8_t kind;                 /**< Feedback operation: BS_ACK or BS_NACK. */
 };
 
 /** CRC32/ISO-HDLC (reflected polynomial 0xedb88320), identical to zlib.crc32().

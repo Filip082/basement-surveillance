@@ -265,8 +265,10 @@ class SX1262Transceiver:
                                 controller.on_frame(raw, rssi=rssi, snr=snr)
                             except ProtocolError as exc:
                                 LOG.warning("Rejected received frame: %s", exc)
-                        elif state in (radio.STATUS_CRC_ERR, radio.STATUS_HEADER_ERR):
-                            LOG.warning("PHY frame CRC/header error")
+                        elif state == radio.STATUS_HEADER_ERR:
+                            LOG.warning("PHY frame header error")
+                        elif state == radio.STATUS_CRC_ERR:
+                            LOG.warning("PHY frame CRC error")
                         else:
                             LOG.debug("RX status: %s", state)
                     rx_started = False

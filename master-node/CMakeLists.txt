@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
-# Preserve USB console rather than using the D6/D7 UART pins.
-set(SNIPPET cdc-acm-console)
+# xiao_ble enables CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM by default, so logs
+# already use USB. Adding cdc-acm-console creates a second CDC ACM device and
+# redirects zephyr,console away from the port registered by the board backend.
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(master_node)
 

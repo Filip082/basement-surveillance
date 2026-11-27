@@ -212,6 +212,7 @@ class FeedbackTests(unittest.TestCase):
         Returns:
             None: Assertions raise on failure; unittest records the result.
         """
+        self.ctrl = FeedbackController(self.store, quiet_seconds=0, duty_cycle=0.01)
         parts, end = self.frames()
         self.ctrl.on_frame(end, now=1)
         msg = self.ctrl.poll(now=999999)
@@ -220,7 +221,7 @@ class FeedbackTests(unittest.TestCase):
         self.assertFalse(self.ctrl.reserve_transmit(msg))
         self.store.close()
         self.store = MessageStore(self.path)
-        self.ctrl = FeedbackController(self.store, quiet_seconds=0)
+        self.ctrl = FeedbackController(self.store, quiet_seconds=0, duty_cycle=0.01)
         self.ctrl.on_frame(end, now=1)
         msg = self.ctrl.poll(now=999999)
         self.assertFalse(self.ctrl.reserve_transmit(msg))

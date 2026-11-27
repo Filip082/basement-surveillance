@@ -8,8 +8,12 @@
 
 uint64_t bs_tx_spacing_ms(uint32_t airtime_ms, uint16_t duty_permille)
 {
-	if (airtime_ms == 0 || duty_permille == 0 || duty_permille > 1000) {
+	if (airtime_ms == 0 || duty_permille > 1000) {
 		return 0;
+	}
+	/* A disabled limiter permits another TX as soon as the current airtime ends. */
+	if (duty_permille == 0) {
+		return airtime_ms;
 	}
 	return ((uint64_t)airtime_ms * 1000U + duty_permille - 1U) / duty_permille;
 }

@@ -67,6 +67,8 @@ services:
     environment:
       BACKEND_URL: http://backend:${PORT:-8000}
       BORDER_DB: /data/router-v1.sqlite3
+      # Temporary test default: no duty limiter. Set LORA_DUTY=0.01 to restore 1%.
+      LORA_DUTY: ${LORA_DUTY:-0}
 
     devices:
       - /dev/spidev0.0:/dev/spidev0.0

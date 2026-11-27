@@ -85,7 +85,7 @@ class FeedbackController:
         sf (int): LoRa spreading factor used by the actual radio.
         bw (int): Actual radio bandwidth in Hz.
         cr (int): Actual coding-rate denominator (5 through 8).
-        duty_cycle (float): Allowed TX fraction, normally 0.01; 0 bypasses all airtime limits.
+        duty_cycle (float): Allowed TX fraction; test default 0 bypasses all airtime limits.
 
     Returns:
         FeedbackController: Scheduler sharing the durable message and airtime store.
@@ -99,7 +99,7 @@ class FeedbackController:
         sf: int = 7,
         bw: int = 125_000,
         cr: int = 5,
-        duty_cycle: float = 0.01,
+        duty_cycle: float = 0,
     ) -> None:
         """Validate timing and modulation and create an empty END-response queue.
 
@@ -109,8 +109,8 @@ class FeedbackController:
             sf (int): LoRa spreading factor used by the actual radio.
             bw (int): Actual radio bandwidth in Hz.
             cr (int): Actual coding-rate denominator (5 through 8).
-            duty_cycle (float): Allowed TX fraction, normally 0.01; 0 bypasses all airtime
-                limits.
+            duty_cycle (float): Allowed TX fraction; test default 0 bypasses all airtime limits.
+                Set 0.01 to restore the 1% limiter.
 
         Returns:
             None: This operation returns no value.
@@ -229,7 +229,7 @@ class FeedbackController:
         # To disable the airtime restrictions COMPLETELY, use --duty-cycle 0
         # (LORA_DUTY=0), or construct this controller with duty_cycle=0.
         # This bypasses both rolling budget and off-time, including saved history.
-        # Keep the default 0.01 for the default European 868.1 MHz configuration.
+        # Temporary test default: disabled. Restore duty_cycle=0.01 for the 1% profile.
         if self.duty_cycle == 0:
             return True
         airtime = lora_airtime_seconds(len(item.packet), sf=self.sf, bw=self.bw, cr=self.cr)

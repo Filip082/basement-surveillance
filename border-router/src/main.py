@@ -54,8 +54,8 @@ def run(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--duty-cycle",
         type=float,
-        default=os.getenv("LORA_DUTY", "0.01"),
-        help="TX airtime fraction (default: 0.01); 0 completely disables the limiter",
+        default=os.getenv("LORA_DUTY", "0"),
+        help="TX airtime fraction (test default: 0, disabled); use 0.01 to restore the 1%% limiter",
     )
     ap.add_argument("--quiet-seconds", type=float, default=0.35)
     ap.add_argument(
@@ -84,6 +84,8 @@ def run(argv: list[str] | None = None) -> int:
             cr=opts.cr,
             duty_cycle=opts.duty_cycle,
         )
+        if opts.duty_cycle == 0:
+            LOG.info("TX duty-cycle limiter disabled for testing; RX quiet period remains active")
         forwarder = None if opts.no_http else HttpForwarder(opts.backend_url)
         cfg = RadioConfig(
             gpio_chip=opts.gpio_chip,

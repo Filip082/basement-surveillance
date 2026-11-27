@@ -1,6 +1,6 @@
 # Master-node LoRa sender
 
-Reusable **C/Zephyr 4.4.2** communication component for the Seeed XIAO nRF52840 and Wio-SX1262 in [basement-surveillance](https://github.com/Filip082/basement-surveillance). A temporary demo sends one JSON test ENTRY per iteration. Entry detection, camera acquisition, telemetry collection and message queues are future application work.
+Reusable **C/Zephyr 4.4.2** communication component for the Seeed XIAO nRF52840 and Wio-SX1262 in [basement-surveillance](https://github.com/Filip082/basement-surveillance). A temporary demo sends one JSON test ENTRY per iteration. **For current testing, sender/router duty limiting and the sender boot duty guard are disabled, and the demo sleeps one second after each completed session.** Entry detection, camera acquisition, telemetry collection and message queues are future application work.
 
 ```text
 future sensors/camera -> sender API -> raw LoRa DATA + END -> Raspberry Pi border router
@@ -15,7 +15,7 @@ The authoritative wire contract is **version 1** in the sibling [border-router s
 
 - `protocol.c` is portable C11: CRC32, byte serialization, fragmentation and strict matching ACK/NACK validation. It has no Zephyr or radio dependency.
 - `tx_session.c` is a blocking, bounded sender state machine using injected send/receive/time callbacks. It retains message metadata across retries and can later be called by an application-owned queue worker.
-- `lora_transport.c` binds that state machine to Zephyr's `lora0` device, `lora_config()`, `lora_send()`, `lora_recv()` and `lora_airtime()`. It owns the half-duplex radio and enforces independent sender duty spacing with `k_msleep()`.
+- `lora_transport.c` binds that state machine to Zephyr's `lora0` device, `lora_config()`, `lora_send()`, `lora_recv()` and `lora_airtime()`. It owns the half-duplex radio and supports independent sender duty spacing with `k_msleep()` when enabled.
 - `message_ids.c` uses Zephyr NVS and the board's existing flash storage partition to reserve monotonically increasing IDs before use.
 - `main.c` is only a test application. Zephyr supplies the radio/SPI/GPIO drivers, DIO1 interrupt processing, sleeping/timing, mutex, flash storage and USB console. The application adds no heap allocations, radio thread or queue.
 
@@ -55,7 +55,7 @@ The first start initializes the workspace and runs `west update --narrow -o=--de
 | `Kconfig` | Application options, ranges and defaults |
 | `prj.conf` | Enables LoRa, the pinned LoRaMac backend, logging and the test sender; sets a 4096-byte main stack |
 | `boards/xiao_ble.overlay` | `lora0`, SPI/control pins, RF switching and TCXO; disables connector I2C because D4/D5 are used by the radio |
-| `CMakeLists.txt` | Registers C sources/includes and preserves the `cdc-acm-console` snippet |
+| `CMakeLists.txt` | Registers C sources/includes and uses the board's built-in USB CDC ACM console |
 | `west.yml` | Pins Zephyr and the allowlisted backend/SoC modules |
 | `.devcontainer/Dockerfile`, `devcontainer.json` | Shared build tools, west initialization and persistent workspace layout |
 
@@ -79,13 +79,13 @@ Use `prj.conf` for application choices, `west build -t menuconfig` to explore Kc
 | `CONFIG_APP_LORA_DEMO` | `y` | Enable the temporary test loop; set `n` to integrate real application logic |
 | `CONFIG_APP_PERSISTENT_IDS` | `y` | Build the NVS message-ID allocator; required by the demo |
 | `CONFIG_APP_DEVICE_ID` | `1` | Provision a different ID for each physical sender |
-| `CONFIG_APP_DEMO_INTERVAL_SECONDS` | `60` | Sleep after a completed or failed session; radio duty delays apply in addition |
+| `CONFIG_APP_DEMO_INTERVAL_SECONDS` | `1` in `prj.conf` | Temporary test pause after a session; the Kconfig fallback remains 60 seconds |
 | `CONFIG_APP_LORA_FREQUENCY` | `868100000` | Hz; occupied channel must fit the 868.0–868.6 MHz profile |
 | `CONFIG_APP_LORA_SF` | `7` | SF7–SF12; must match the router |
 | `CONFIG_APP_LORA_BANDWIDTH` | `125000` | 125000, 250000 or 500000 Hz; must fit the configured sub-band |
 | `CONFIG_APP_LORA_TX_POWER` | `14` | Nominal dBm; configurable downward to -9 |
-| `CONFIG_APP_LORA_DUTY_PERMILLE` | `10` | Sender duty fraction: 10/1000 = 1%; can be made stricter |
-| `CONFIG_APP_ROUTER_DUTY_PERMILLE` | `10` | Router fraction used for calculating the feedback window |
+| `CONFIG_APP_LORA_DUTY_PERMILLE` | `0` | Test default: disable TX spacing and boot duty guard; 10 restores 1% |
+| `CONFIG_APP_ROUTER_DUTY_PERMILLE` | `0` | Router limiter disabled for testing; use 10 when the router is restored to 1% |
 | `CONFIG_APP_ROUTER_QUIET_MS` | `350` | Router quiet period used for feedback timing |
 | `CONFIG_APP_LORA_FEEDBACK_TIMEOUT_MS` | `20000` | Minimum RX window; increased automatically for slow modulation/router duty spacing |
 | `CONFIG_APP_LORA_END_ATTEMPTS` | `8` | Maximum END/feedback rounds per message |
@@ -122,7 +122,9 @@ This uses the existing application partition and preserves the UF2/SoftDevice re
 
 ### USB console
 
-The `cdc-acm-console` snippet remains enabled in CMake, so logs use USB rather than D6/D7 UART pins. Open the serial port on the host:
+The `xiao_ble` board enables `CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM` by default, so logs use USB. Do not add the `cdc-acm-console` snippet: it creates a second CDC ACM device and redirects `zephyr,console` away from the port registered by the board's USB backend, leaving the visible serial port without application logs.
+
+Build with `west build -b xiao_ble -p always`, then flash the newly generated `build/zephyr/zephyr.uf2`. Building alone does not update the board. Open the serial port on the host:
 
 - Windows: find the COM port in Device Manager, then use PuTTY at 115200 or `python -m serial.tools.miniterm COM6 115200`.
 - Linux: `screen /dev/ttyACM0 115200` (quit with Ctrl+A, then K). For permission errors, add your account to `dialout` and log in again.
@@ -180,17 +182,31 @@ The sender transmits DATA, then END containing the original kind, then immediate
 
 After at most `APP_LORA_END_ATTEMPTS` rounds, the call returns `-ETIMEDOUT`; this is not proof that the router failed to receive the body. TX I/O errors have a separate bounded per-packet retry count. Unrecovered receive errors return their negative errno. IDs/checksums remain stable within the session. A caller can retry the same immutable message with the same reserved ID after an ambiguous failure; a distinct application message always needs a fresh ID.
 
-The router may ACK after a duty delay, and a previous large NACK can impose a longer off-time. The receive window is at least 20 seconds and is increased using the maximum NACK airtime, configured router duty fraction, quiet interval and a scheduling margin. It stays in RX during the entire logical wait, apart from short reconfiguration gaps after received packets. Do not use an arbitrary one-second deadline. Multiple nodes still need higher-level channel coordination; another sender continuously occupying the channel can cause bounded failure.
+With duty limiting enabled, the router may ACK after a duty delay, and a previous large NACK can impose a longer off-time. With the current zero setting, no duty-derived spacing is added to the feedback window. The receive deadline remains at least 20 seconds and accounts for maximum NACK airtime, any enabled router duty spacing, quiet time and a scheduling margin. A matching ACK ends the wait immediately; successful test messages do not wait out the entire timeout. It stays in RX during the entire logical wait, apart from short reconfiguration gaps after received packets. Do not use an arbitrary one-second deadline. Multiple nodes still need higher-level channel coordination; another sender continuously occupying the channel can cause bounded failure.
 
 See [border-router/README.md](../border-router/README.md) for full field offsets, durable reassembly, NACK pagination, retention and HTTP behavior.
 
-## Independent sender duty-cycle scheduling
+## Temporary unrestricted test configuration
+
+The current `prj.conf` sets:
+
+```ini
+CONFIG_APP_LORA_DUTY_PERMILLE=0
+CONFIG_APP_ROUTER_DUTY_PERMILLE=0
+CONFIG_APP_DEMO_INTERVAL_SECONDS=1
+```
+
+Zero bypasses sender duty waits and the startup duty guard, and tells feedback timing that the router is unrestricted. The border-router CLI/controller and Compose service also default to zero (`LORA_DUTY=0`). An explicit environment/CLI override can still enable the router limiter. The 350 ms router quiet period, PHY airtime, bounded ACK/NACK waits and radio switching remain necessary. The USB enumeration delay also remains.
+
+To **restore the 1% profile**, set both master-node duty values to `10`, rebuild with `west build -b xiao_ble -p always` and flash the new UF2. Set `LORA_DUTY=0.01` in the root `.env` and recreate the router container, or pass `--duty-cycle 0.01` when running directly. Set the demo interval back to 60 seconds if desired. Use the unrestricted configuration only in an appropriate permitted test setup.
+
+## Independent sender duty-cycle scheduling (when enabled)
 
 The router's limiter cannot account for sender airtime. Before each DATA/END/retransmission, this firmware waits until its own next permitted TX time. Airtime comes from `lora_airtime()` under the actual TX configuration, rounded to milliseconds plus 5 ms margin. After an attempted transmission, the sender waits at least `airtime * (1 / duty_fraction - 1)` after completion, including failed attempts. It sleeps with Zephyr timing APIs and never busy-waits for a duty interval.
 
-At boot it waits one full maximum-packet spacing before the first transmission. This conservative guard covers an immediately preceding transmission when elapsed off-time cannot be trusted across resets. It can take tens of seconds at SF7, and much longer at slow SF/stricter limits. It is separate from the demo's 60-second interval. Receiver feedback windows remain open while the router waits for its independent allowance.
+When sender duty limiting is enabled, boot waits one full maximum-packet spacing before the first transmission. With the current zero setting, this startup guard is skipped. This conservative guard covers an immediately preceding transmission when elapsed off-time cannot be trusted across resets. It can take tens of seconds at SF7, and much longer at slow SF/stricter limits. It is separate from the configurable demo interval, currently one second for testing. Receiver feedback windows remain open while the router waits for its independent allowance.
 
-The implemented profile requires the entire channel to fit **868.0–868.6 MHz** and allows at most 1% TX duty, configurable downward. Other sub-bands need a separately reviewed profile. TX power is not radiated ERP: check antenna gain, losses, hardware characteristics and national regulations. Firmware timing alone is not a compliance certification. There is no random backoff/channel allocation between multiple senders. Like protocol v1 on the router, the link is unencrypted and unauthenticated; CRC32 detects accidental corruption rather than proving sender identity.
+The implemented channel profile still requires the entire channel to fit **868.0–868.6 MHz**. When duty limiting is enabled, its range is at most 1%, configurable downward; zero is the explicit test bypass. Other sub-bands need a separately reviewed profile. TX power is not radiated ERP: check antenna gain, losses, hardware characteristics and national regulations. Firmware timing alone is not a compliance certification. There is no random backoff/channel allocation between multiple senders. Like protocol v1 on the router, the link is unencrypted and unauthenticated; CRC32 detects accidental corruption rather than proving sender identity.
 
 ### IDs and flash lifetime
 
@@ -230,7 +246,7 @@ The tests compile the actual `protocol.c` and `tx_session.c` with `-std=c11 -Wal
 1. Enable `CONFIG_APP_LORA_DEMO=y`, provision `CONFIG_APP_DEVICE_ID`, clean-build and flash.
 2. Enable Pi SPI and start the existing router from the repository root: `docker compose --profile hardware up -d --build`.
 3. Open the XIAO USB console and follow router logs: `docker compose logs -f border-router`.
-4. Allow the startup duty guard to elapse. Expect a test ENTRY with a new message ID, END, then a matching ACK. Sender logs report `Delivered`; router logs report assembly and ACK transmission.
+4. With the current test settings there is no startup duty guard. Expect a test ENTRY with a new message ID, END, then a matching ACK. Sender logs report `Delivered`; router logs report assembly and ACK transmission.
 5. Reset the sender and confirm that its next ID advances past the previously reserved block.
 
 The companion backend currently needs its ingestion endpoints implemented. The router can durably receive and ACK the test event while HTTP retries continue; that condition is distinct from an RF failure. No real radio exchange is claimed until this procedure has been performed on the actual devices.
@@ -259,9 +275,9 @@ Use `BS_ENTRY`/`BS_TELEMETRY` for JSON bytes and `BS_IMAGE` for JPEG bytes. The 
 - **Unknown Kconfig option or stale generated headers:** rebuild with `-p always`; application `Kconfig` must source `Kconfig.zephyr`.
 - **Radio not ready or BUSY/sync readback errors:** check module kit revision, 3.3 V/GND, NSS, reset, BUSY and the overlay. Persistent BUSY faults can require a power cycle; upstream driver BUSY handling is not an application watchdog.
 - **No ACK:** verify raw sync word 0x0741 on both peers, channel/SF/BW/CR/CRC/IQ/preamble, RF_SW/DIO2, DIO1 IRQ wiring, TCXO configuration and the calculated receive window. Check that the router received END and has TX duty allowance. Antenna/coverage problems and another sender occupying the radio can also cause failures.
-- **Long pauses before TX:** inspect the logged startup guard and duty delays; payloads at slower SF can take minutes or longer to transfer lawfully.
+- **Long pauses before TX:** confirm the flashed `prj.conf` uses duty values `0` and a one-second demo interval. A startup duty delay indicates the limiter is enabled in that firmware. Missing ACKs still use bounded feedback timeouts.
 - **NVS initialization or ID reservation failure:** preserve storage for diagnosis. Do not reset the sequence as a workaround against an existing router identity.
-- **USB console missing:** use a data-capable cable, leave bootloader mode, check the host serial device/group permissions and preserve `cdc-acm-console`.
+- **USB console missing or silent:** use a data-capable cable, leave bootloader mode and check the host serial device/group permissions. Do not add `cdc-acm-console`. After a pristine build, `build/zephyr/zephyr.dts` should select `zephyr,console = &board_cdc_acm_uart` and contain only one `zephyr,cdc-acm-uart` device. Flash the rebuilt UF2 and reopen the serial port; deferred logging starts after about four seconds with the pinned board configuration.
 
 To upgrade Zephyr, change `west.yml` and `.devcontainer/Dockerfile` together, keep SDK compatible with `zephyr/SDK_VERSION`, rebuild the container and update the west workspace. Re-audit sync-word exports, warm-sleep retention, TX timeout and LDRO behavior before changing backend or module revisions.
 

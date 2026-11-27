@@ -57,18 +57,20 @@ config APP_LORA_TX_POWER
 	  Conservative power range; antenna gain and losses still determine radiated ERP.
 
 config APP_LORA_DUTY_PERMILLE
-	int "Sender TX duty fraction in parts per thousand (10 = 1%)"
-	range 1 10
-	default 10
+	int "Sender TX duty fraction in parts per thousand (0 = disabled, 10 = 1%)"
+	range 0 10
+	default 0
 	help
-	  Applies to every DATA, END and retransmission, including failed TX attempts.
+	  Temporary test default: 0 disables all TX spacing and the startup duty guard.
+	  Set 10 to restore 1% scheduling for DATA, END and retransmissions, including failed TX.
 
 config APP_ROUTER_DUTY_PERMILLE
 	int "Router TX duty fraction used to size the receive window"
-	range 1 10
-	default 10
+	range 0 10
+	default 0
 	help
-	  Must be no greater than the actual router fraction, otherwise deadlines can be too short.
+	  Set 0 only when the router limiter is disabled. Otherwise use its actual fraction
+	  or a lower value so duty-limited ACK/NACK can arrive within the receive window.
 
 config APP_ROUTER_QUIET_MS
 	int "Router receive quiet period in milliseconds"

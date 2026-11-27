@@ -89,7 +89,7 @@ static int send_frame(void *context, const uint8_t *frame, size_t size)
 	}
 	uint64_t now = now_ms(NULL);
 
-	if (now < next_tx_ms) {
+	if (CONFIG_APP_LORA_DUTY_PERMILLE > 0 && now < next_tx_ms) {
 		LOG_INF("Duty-cycle delay: %llu ms", (unsigned long long)(next_tx_ms - now));
 		k_msleep((int64_t)(next_tx_ms - now));
 	}
@@ -109,8 +109,12 @@ static int send_frame(void *context, const uint8_t *frame, size_t size)
 	/* Charge from completion, which is conservative if the call returned early.
 	 * Strict spacing bounds TX duty without keeping an hourly packet ledger.
 	 */
-	next_tx_ms = now_ms(NULL) + bs_tx_spacing_ms(airtime_ms, CONFIG_APP_LORA_DUTY_PERMILLE) -
-		     airtime_ms;
+	if (CONFIG_APP_LORA_DUTY_PERMILLE > 0) {
+		next_tx_ms = now_ms(NULL) +
+			     bs_tx_spacing_ms(airtime_ms, CONFIG_APP_LORA_DUTY_PERMILLE) - airtime_ms;
+	} else {
+		next_tx_ms = 0;
+	}
 	return ret;
 }
 
@@ -191,9 +195,6 @@ int bs_lora_init(void)
 	if (ret < 0) {
 		return ret;
 	}
-	/* On reboot there is no trustworthy elapsed wall time. Wait a full maximum-
-	 * packet spacing so cycling power cannot shorten the previous TX's off-time.
-	 */
 	/* The pinned backend gives Radio.SetTxConfig a 4000 ms software timeout.
 	 * Keep DATA below 3750 ms at slow SFs rather than changing private timer state.
 	 * Fragment size is not part of the PHY settings and is legal in protocol v1.
@@ -205,15 +206,27 @@ int bs_lora_init(void)
 	if (lora_airtime(radio, BS_HEADER_SIZE + part_size) > 3750U) {
 		return -ENOTSUP;
 	}
-	uint32_t max_airtime = lora_airtime(radio, BS_RADIO_MAX) + 5U;
+	uint32_t boot_guard_ms = 0;
 
-	next_tx_ms = now_ms(NULL) + bs_tx_spacing_ms(max_airtime, CONFIG_APP_LORA_DUTY_PERMILLE);
+	if (CONFIG_APP_LORA_DUTY_PERMILLE > 0) {
+		/* Without a trusted wall clock, preserve conservative off-time across resets. */
+		uint32_t max_airtime = lora_airtime(radio, BS_RADIO_MAX) + 5U;
+
+		boot_guard_ms = (uint32_t)bs_tx_spacing_ms(max_airtime,
+						       CONFIG_APP_LORA_DUTY_PERMILLE);
+		next_tx_ms = now_ms(NULL) + boot_guard_ms;
+	} else {
+		/* Zero bypasses the startup guard as well as per-packet duty waits. */
+		next_tx_ms = 0;
+		LOG_INF("TX duty-cycle limiter and startup guard disabled for testing");
+	}
 	/* A preceding maximum-size NACK can defer the router's next feedback. Include
-	 * its default 1% spacing, quiet time, response airtime and scheduling margin.
+	 * any enabled duty spacing, quiet time, response airtime and scheduling margin.
 	 */
 	uint32_t reply_airtime = lora_airtime(radio, BS_CONTROL_MAX) + 5U;
-	uint64_t reply_window = bs_tx_spacing_ms(reply_airtime, CONFIG_APP_ROUTER_DUTY_PERMILLE) +
-				 reply_airtime + CONFIG_APP_ROUTER_QUIET_MS + 2000U;
+	uint64_t router_spacing = CONFIG_APP_ROUTER_DUTY_PERMILLE == 0 ? 0 :
+		bs_tx_spacing_ms(reply_airtime, CONFIG_APP_ROUTER_DUTY_PERMILLE);
+	uint64_t reply_window = router_spacing + reply_airtime + CONFIG_APP_ROUTER_QUIET_MS + 2000U;
 
 	if (reply_window > UINT32_MAX) {
 		return -ERANGE;
@@ -224,7 +237,7 @@ int bs_lora_init(void)
 		CONFIG_APP_LORA_FREQUENCY, CONFIG_APP_LORA_SF, CONFIG_APP_LORA_BANDWIDTH);
 	LOG_INF("TX duty=%d/1000; feedback window=%u ms; boot guard=%u ms; DATA chunk=%u",
 		CONFIG_APP_LORA_DUTY_PERMILLE, feedback_timeout_ms,
-		(uint32_t)(next_tx_ms - now_ms(NULL)), part_size);
+		boot_guard_ms, part_size);
 	return 0;
 }
 
