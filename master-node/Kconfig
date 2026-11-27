@@ -58,6 +58,26 @@ config APP_PROGRESS_LOG_BYTES
 	default 8192
 	range 512 100000
 
+config APP_RTC_BOOT_HOUR
+    int "Local hour at boot (-1: unknown, do not arm noon alarm)"
+    range -1 23
+    default -1
+    help
+      The nRF52840 has a low-frequency RTC counter, NOT a battery-backed
+      calendar clock. Set the hour/minute/second only if the current local
+      time at firmware START is known. For an accurate noon alarm, call
+      noon_clock_set_local_time() from a trusted time source after boot.
+
+config APP_RTC_BOOT_MINUTE
+    int "Local minute at boot (testing/initial synchronization)"
+    range 0 59
+    default 0
+
+config APP_RTC_BOOT_SECOND
+    int "Local second at boot (testing/initial synchronization)"
+    range 0 59
+    default 0
+
 config APP_AUTO_REPAIR
 	bool "Forget the stored bond and pair again when the camera lost its key"
 	default y
