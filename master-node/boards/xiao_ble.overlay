@@ -32,3 +32,20 @@
 		tcxo-power-startup-delay-ms = <5>;
 	};
 };
+
+/*
+ * Lines to the camera node. PLACEHOLDER pins: D1..D5 and the SPI header are used
+ * by the LoRa module, D0 / D6 / D7 are what is left on the XIAO. D6/D7 are also the
+ * board's UART0 pins; the console is USB here so UART0 is unused, but pick the
+ * final pins when the hardware is designed.
+ *
+ *   trigger-gpios   input,  "take a picture now" (active LOW, pull-up)
+ *   cam-wake-gpios  output, pulled LOW for a moment to wake the camera node
+ */
+/ {
+	zephyr,user {
+		trigger-gpios = <&xiao_d 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		battery-trigger-gpios = <&xiao_d 7 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;   /* placeholder */
+		cam-wake-gpios = <&xiao_d 0 GPIO_ACTIVE_LOW>;
+	};
+};

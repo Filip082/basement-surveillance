@@ -37,9 +37,10 @@ static const ble_uuid128_t UUID_IMAGE = CAM_UUID128(0x03);
 
 /* Image notification packet types (little-endian fields) */
 enum {
-    PKT_START = 0x01,   /* [01][len u32][w u16][h u16]  */
+    PKT_START = 0x01,   /* [01][len u32][w u16][h u16][flags u8][faces u8][humans u8]*/
     PKT_DATA  = 0x02,   /* [02][seq u16][jpeg bytes...] */
     PKT_END   = 0x03,   /* [03][crc32 u32]  zlib CRC32 of the whole JPEG */
+    PKT_BATTERY = 0x04, /* [04][percent u8][battery mV u16][pin mV u16]  battery report */
 };
 
 /* ------------------------------------------------------------------ state */
@@ -52,6 +53,7 @@ enum {
     EV_DISCONNECTED = 1u << 4,
     EV_ACK          = 1u << 5,
     EV_NAK          = 1u << 6,
+    EV_READY        = 1u << 7,      /* the computer wrote READY (0x03): it is listening now */
 };
 
 #ifdef CONFIG_NODE_BLE_REQUIRE_ENCRYPTION
@@ -87,6 +89,8 @@ static int ctrl_access(uint16_t conn, uint16_t attr, struct ble_gatt_access_ctxt
         xEventGroupSetBits(s_ev, EV_ACK);
     } else if (cmd == 0x02) {
         xEventGroupSetBits(s_ev, EV_NAK);
+    } else if (cmd == 0x03) {
+        xEventGroupSetBits(s_ev, EV_READY);
     }
     return 0;
 }
@@ -172,7 +176,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         NLOGI(T, "connect: status=%d handle=%d", event->connect.status, event->connect.conn_handle);
         if (event->connect.status == 0) {
             s_conn = event->connect.conn_handle;
-            xEventGroupClearBits(s_ev, EV_DISCONNECTED | EV_ACK | EV_NAK);
+            xEventGroupClearBits(s_ev, EV_DISCONNECTED | EV_ACK | EV_NAK | EV_READY);
             xEventGroupSetBits(s_ev, EV_CONNECTED);
 
             /* Best effort speed-ups: long packets, short connection interval (7.5-15 ms). */
@@ -196,7 +200,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_DISCONNECT:
         NLOGI(T, "disconnect: reason=%d", event->disconnect.reason);
         s_conn = BLE_HS_CONN_HANDLE_NONE;
-        xEventGroupClearBits(s_ev, EV_CONNECTED | EV_ENCRYPTED | EV_SUBSCRIBED);
+        xEventGroupClearBits(s_ev, EV_CONNECTED | EV_ENCRYPTED | EV_SUBSCRIBED | EV_READY);
         xEventGroupSetBits(s_ev, EV_DISCONNECTED);
         if (s_adv_wanted) {
             start_advertising();            /* the computer may reconnect within the window */
@@ -379,7 +383,13 @@ esp_err_t ble_link_wait_ready(uint32_t timeout_ms)
 {
     EventBits_t b = xEventGroupWaitBits(s_ev, NEED_READY, pdFALSE, pdTRUE, pdMS_TO_TICKS(timeout_ms));
     if ((b & NEED_READY) == NEED_READY) {
-        return ESP_OK;
+        /* A bonded peer's subscription is restored by NimBLE right after encryption, before the
+         * computer has finished MTU exchange / discovery and is really listening: anything sent
+         * now is lost. Wait for its explicit READY; older receivers that never send it get a
+         * short grace period instead. */
+        b = xEventGroupWaitBits(s_ev, EV_READY, pdFALSE, pdTRUE, pdMS_TO_TICKS(1500));
+        NLOGI(T, "computer %s", (b & EV_READY) ? "reported READY" : "sent no READY - going on anyway");
+        return s_conn == BLE_HS_CONN_HANDLE_NONE ? ESP_ERR_INVALID_STATE : ESP_OK;
     }
     NLOGW(T, "no usable computer within %u ms (connected=%d encrypted=%d subscribed=%d)",
           (unsigned)timeout_ms, !!(b & EV_CONNECTED), !!(b & EV_ENCRYPTED), !!(b & EV_SUBSCRIBED));
@@ -435,7 +445,8 @@ static bool notify_retry(const uint8_t *data, size_t len)
     return false;
 }
 
-esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height)
+esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, uint16_t height,
+                              uint8_t flags, uint8_t faces, uint8_t humans)
 {
     if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
         return ESP_ERR_INVALID_STATE;
@@ -453,11 +464,14 @@ esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, u
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t start[9] = { PKT_START };
+    uint8_t start[12] = { PKT_START };
     uint32_t len32 = (uint32_t)len;
     memcpy(&start[1], &len32, 4);                         /* ESP32 is little-endian */
     memcpy(&start[5], &width, 2);
     memcpy(&start[7], &height, 2);
+    start[9] = flags;                                     /* bit0: face detected */
+    start[10] = faces;                                    /* number of faces found */
+    start[11] = humans;                                   /* number of people found */
     if (!notify_retry(start, sizeof(start))) {
         return ESP_FAIL;
     }
@@ -485,6 +499,22 @@ esp_err_t ble_link_send_image(const uint8_t *jpeg, size_t len, uint16_t width, u
     int64_t ms = (esp_timer_get_time() - t0) / 1000;
     NLOGI(T, "sent %u bytes in %lld ms (%u B/packet, MTU %u, crc=0x%08x)",
           (unsigned)len, (long long)ms, (unsigned)chunk, mtu, (unsigned)crc);
+    return ESP_OK;
+}
+
+esp_err_t ble_link_send_battery(uint8_t percent, uint16_t battery_mv, uint16_t adc_mv)
+{
+    if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xEventGroupClearBits(s_ev, EV_ACK | EV_NAK);
+    uint8_t pkt[6] = { PKT_BATTERY, percent };
+    memcpy(&pkt[2], &battery_mv, 2);                      /* ESP32 is little-endian */
+    memcpy(&pkt[4], &adc_mv, 2);
+    if (!notify_retry(pkt, sizeof(pkt))) {
+        return ESP_FAIL;
+    }
+    NLOGI(T, "battery report sent: %u %% (%u mV)", percent, battery_mv);
     return ESP_OK;
 }
 

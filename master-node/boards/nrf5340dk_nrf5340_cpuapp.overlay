@@ -1,0 +1,20 @@
+/*
+ * nRF5340 DK, application core: the two lines to the camera node.
+ *
+ *   trigger-gpios   input,  Button 1 (P0.23): "take a picture now".
+ *                   In the final product this is the line from the other MCU.
+ *   battery-trigger-gpios  input, Button 2 (P0.24): "report the camera node battery level".
+ *   cam-wake-gpios  output, P1.04 (Arduino header): pulled LOW for a moment to
+ *                   wake the camera node. Wire it to the camera node's wake GPIO
+ *                   (GPIO10 on the DFR1154) and connect GND to GND.
+ *
+ * The camera node's NODE_WAKE_ACTIVE_LOW option must be ON (LOW = wake up).
+ */
+
+/ {
+	zephyr,user {
+		trigger-gpios = <&gpio0 23 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		battery-trigger-gpios = <&gpio0 24 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		cam-wake-gpios = <&gpio1 4 GPIO_ACTIVE_LOW>;
+	};
+};

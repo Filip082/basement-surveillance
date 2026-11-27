@@ -17,3 +17,9 @@ manifest:
           - cmsis_6
           - hal_nordic
           - loramac-node
+          - tinycrypt      # Bluetooth LE Secure Connections (ECC)
+          - mbedtls        # crypto backend used by the Bluetooth host in recent Zephyr
+          - open-amp       # nRF5340: IPC between the application and network core
+          - libmetal       # needed by open-amp
+          - tf-psa-crypto          # mbedtls 4.x keeps its crypto core in this module
+          - tf-psa-crypto-drivers

@@ -15,7 +15,7 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
 # 1 ms tick: short delays are really short (BLE notification pacing)
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # Skip the PSRAM self-test at boot (saves ~0.3 s per cold boot)
 CONFIG_SPIRAM_MEMTEST=n
 
@@ -30,3 +30,7 @@ CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
 # Big MTU + more mbufs so JPEG chunks stream quickly
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=512
 CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=24
+
+# --- partitions: 16 MB flash, 6 MB app (the face model alone is ~1.5 MB) ----
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
