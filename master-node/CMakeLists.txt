@@ -17,4 +17,5 @@ target_sources(app PRIVATE
     src/camera_link.c
     src/image_store.c
     src/cam_wake.c
+    src/noon_clock.c
 )
