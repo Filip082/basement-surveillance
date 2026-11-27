@@ -83,6 +83,7 @@ static int input_init(const struct gpio_dt_spec *spec, struct gpio_callback *cb,
 int main(void)
 {
     LOG_INF("master-node up on %s", CONFIG_BOARD_TARGET);
+	int counter_test = 0;
 
     /* PCF8575 is initialized by Zephyr. Its /INT line is on XIAO D0. */
     if (!gpio_is_ready_dt(&status_led) ||
@@ -149,6 +150,24 @@ int main(void)
                                 image_status_str(img->status));
                     }
                 }*/
+				if (counter_test == 0) {
+					if(take_image()){
+						const struct stored_image *img = get_image();
+						if (img != NULL) {
+							// >>> picture is in RAM: img->data, img->len, img->status. <<< 
+							LOG_DBG("image ready: %u bytes, %s", img->len,
+									image_status_str(img->status));
+						}
+					}
+					counter_test = 1;
+				} else {
+					struct battery_info bat;
+
+					if (read_battery(&bat)) {
+						LOG_DBG("camera node battery: %u %% (%u mV)", bat.percent, bat.battery_mv);
+					}
+					counter_test = 0;
+				}
             } else {
                 LOG_DBG("PCF interrupt ignored: PIR is LOW");
             }
