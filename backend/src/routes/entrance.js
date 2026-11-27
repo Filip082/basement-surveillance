@@ -1,5 +1,8 @@
 const express = require('express');
 
+const { sendAlertInBackground } = require('../notifier');
+const { entranceAlert } = require('../notifier/alerts');
+
 const router = express.Router();
 
 router.post('/', async (req, res) => {
@@ -14,6 +17,8 @@ router.post('/', async (req, res) => {
         status: 'ok',
         event_timestamp: eventTimestamp.toISOString(),
     });
+
+    sendAlertInBackground(entranceAlert(eventTimestamp));
     // new Date(timestamp).toLocaleString('pl-PL', {
     // timeZone: 'Europe/Warsaw'
     // });
