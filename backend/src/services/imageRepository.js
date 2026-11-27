@@ -14,14 +14,32 @@ async function saveImageMetadata(filePath, eventTimestamp) {
     return result.rows[0];
 }
 
-async function getAllImages() {
-    const query = `
+async function getAllImages(from = null, to = null) {
+    let query = `
         SELECT id, file_path, event_timestamp, created_at
         FROM images
-        ORDER BY event_timestamp DESC
     `;
 
-    const result = await pool.query(query);
+    const conditions = [];
+    const values = [];
+
+    if (from) {
+        values.push(from);
+        conditions.push(`event_timestamp >= $${values.length}::timestamptz`);
+    }
+
+    if (to) {
+        values.push(to);
+        conditions.push(`event_timestamp <= $${values.length}::timestamptz`);
+    }
+
+    if (conditions.length > 0) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    query += ` ORDER BY event_timestamp DESC`;
+
+    const result = await pool.query(query, values);
 
     return result.rows;
 }
@@ -38,8 +56,35 @@ async function getImageById(id) {
     return result.rows[0] || null;
 }
 
+async function deleteImageById(id) {
+    const query = `
+        DELETE FROM images
+        WHERE id = $1
+        RETURNING id, file_path
+    `;
+
+    const result = await pool.query(query, [id]);
+
+    return result.rows[0] || null;
+}
+
+async function getOldestImage() {
+    const query = `
+        SELECT id, file_path, event_timestamp, created_at
+        FROM images
+        ORDER BY event_timestamp ASC, created_at ASC, id ASC
+        LIMIT 1
+    `;
+
+    const result = await pool.query(query);
+
+    return result.rows[0] || null;
+}
+
 module.exports = {
     saveImageMetadata,
     getAllImages,
     getImageById,
+    deleteImageById,
+    getOldestImage,
 };

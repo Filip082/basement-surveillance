@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { downloadImage } = require('../services/imageService');
 const { getImageById, saveImageMetadata, getAllImages } = require('../services/imageRepository');
+const { enforceStorageLimit } = require('../services/storageService');
 const { sendAlertInBackground } = require('../notifier');
 const { photoAlert } = require('../notifier/alerts');
 
@@ -15,6 +16,8 @@ router.post('/', async (req, res) => {
         const imageUrl = process.env.ROUTER_IMAGE_URL;
 
         const result = await downloadImage(imageUrl);
+
+        await enforceStorageLimit(result.size, result.filePath);
 
         const image = await saveImageMetadata(
             result.filePath,
@@ -42,7 +45,30 @@ router.post('/', async (req, res) => {
 
 router.get('/', async (req, res) => {
     try {
-        const images = await getAllImages();
+        const { from, to } = req.query;
+
+        if (from && isNaN(Date.parse(from))) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid start date',
+            });
+        }
+
+        if (to && isNaN(Date.parse(to))) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid end date',
+            });
+        }
+
+        if (from && to && new Date(from) > new Date(to)) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Start date must not be later than end date',
+            });
+        }
+
+        const images = await getAllImages(from || null, to || null);
 
         res.status(200).json({
             status: 'success',
@@ -55,6 +81,47 @@ router.get('/', async (req, res) => {
         res.status(500).json({
             status: 'error',
             message: 'Failed to fetch images',
+        });
+    }
+});
+
+router.get('/storage', async (req, res) => {
+    try {
+        const imageDir = process.env.IMAGE_DIR || '/data/images';
+
+        const getDirectorySize = (dir) => {
+            let totalSize = 0;
+
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+
+                if (entry.isDirectory()) {
+                    totalSize += getDirectorySize(fullPath);
+                } else if (entry.isFile()) {
+                    totalSize += fs.statSync(fullPath).size;
+                }
+            }
+
+            return totalSize;
+        };
+
+        const sizeBytes = getDirectorySize(imageDir);
+
+        res.status(200).json({
+            status: 'success',
+            sizeBytes,
+            sizeMB: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
+            sizeGB: Number((sizeBytes / (1024 * 1024 * 1024)).toFixed(3))
+        });
+
+    } catch (error) {
+        console.error('Failed to calculate image storage:', error);
+
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to calculate image storage'
         });
     }
 });
