@@ -14,12 +14,36 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from gpiod import LineRequest
     from gpiod.line import Value
+    from LoRaRF import SX126x
 
 from .feedback import FeedbackController, lora_airtime_seconds
 from .protocol import MAX_RADIO_PAYLOAD, ProtocolError
 
 LOG = logging.getLogger(__name__)
 _STATUS_LOG_INTERVAL = 15.0
+_VALID_IRQ_MASK = 0x03FF  # SX1261/2 datasheet table 13-29; bits 15:10 are reserved.
+_RX_MODE = 0x50
+
+
+def _diagnostic_state(radio: SX126x) -> str:
+    """Read raw status and both device-error bytes for an actionable hardware failure.
+
+    Args:
+        radio (SX126x): Initialized driver using the pinned LoRaRF API.
+
+    Returns:
+        str: Raw chip status and complete device-error mask, or a diagnostic-read failure.
+    """
+    try:
+        status = radio.getStatus()
+        # The pinned getDeviceErrors() clocks only status and the first error
+        # byte. GetDeviceErrors (0x17) needs status followed by both error bytes.
+        response = radio._readBytes(0x17, 3)
+        errors = f"0x{(response[1] << 8) | response[2]:04x}" if len(response) == 3 else "unreadable"
+        return f"status=0x{status:02x} device_errors={errors}"
+    except Exception as exc:
+        # Diagnostics must not hide the original invalid IRQ/mode failure.
+        return f"diagnostic_read_failed={type(exc).__name__}: {exc}"
 
 
 @dataclass(frozen=True)
@@ -29,6 +53,7 @@ class RadioConfig:
     Args:
         spi_bus (int): SPI controller number; this wiring supports bus 0.
         spi_cs (int): Hardware chip-select number; this wiring supports CE0.
+        spi_speed (int): SPI clock in Hz; defaults to 1 MHz for a wired Pi connection.
         gpio_chip (int): Linux gpiochip index whose offsets match the wired GPIOs.
         reset_gpio (int): Active-low NRST line offset, normally BCM22.
         busy_gpio (int): BUSY input line offset, normally BCM23.
@@ -47,6 +72,7 @@ class RadioConfig:
 
     spi_bus: int = 0
     spi_cs: int = 0
+    spi_speed: int = 1_000_000
     gpio_chip: int = 0  # Raspberry Pi 4B BCM numbering on gpiochip0
     reset_gpio: int = 22
     busy_gpio: int = 23
@@ -73,6 +99,8 @@ class RadioConfig:
             raise ValueError("RESET, BUSY and RF_SW must be distinct GPIOs outside SPI0 pins 8..11")
         if self.spi_bus != 0 or self.spi_cs != 0 or self.gpio_chip < 0:
             raise ValueError("this wiring supports SPI0 CE0 and a nonnegative GPIO chip")
+        if not 100_000 <= self.spi_speed <= 8_000_000:
+            raise ValueError("SPI speed must be in 100000..8000000 Hz")
         if not 862_000_000 <= self.frequency <= 930_000_000:
             raise ValueError("Wio-SX1262 frequency must be in 862..930 MHz")
         if self.tx_power not in (14, 17, 20, 22):
@@ -211,7 +239,7 @@ class SX1262Transceiver:
             reset = HeldOutputPin(request, cfg.reset_gpio)
             rf_sw = HeldOutputPin(request, cfg.rf_switch_gpio)
             radio = SX126x(
-                LoRaSpi(cfg.spi_bus, cfg.spi_cs),
+                LoRaSpi(cfg.spi_bus, cfg.spi_cs, cfg.spi_speed),
                 HardwareChipSelect(),
                 reset,
                 LoRaGpio(cfg.gpio_chip, cfg.busy_gpio),
@@ -231,6 +259,18 @@ class SX1262Transceiver:
             ldro = (2**cfg.spreading_factor) / cfg.bandwidth >= 0.016
             radio.setLoRaModulation(cfg.spreading_factor, cfg.bandwidth, cfg.coding_rate, ldro)
             radio.setSyncWord(cfg.sync_word)
+            actual_sync = bytes(radio.readRegister(0x0740, 2))
+            expected_sync = cfg.sync_word.to_bytes(2, "big")
+            if actual_sync != expected_sync:
+                raise RuntimeError(
+                    "SX1262 SPI register readback failed: "
+                    f"sync word expected={expected_sync.hex()} "
+                    f"actual={actual_sync.hex() or 'empty'}; check NSS/CE0, MISO, MOSI, SCK, "
+                    "power and ground"
+                )
+            LOG.info(
+                "SX1262 SPI verified speed=%dHz sync_readback=%s", cfg.spi_speed, actual_sync.hex()
+            )
             rf_sw.output(1)
             LOG.info(
                 "Pi 4B SX1262 RX/TX %dHz SF%d BW%d CR4/%d sync=%#06x",
@@ -251,6 +291,7 @@ class SX1262Transceiver:
             next_header_warning = next_crc_warning = 0.0
             while not stop_requested():
                 now = time.monotonic()
+                verify_rx = not rx_started
                 if not rx_started:
                     rf_sw.output(1)
                     # A PHY error can leave the chip in RX. LoRaRF request()
@@ -261,10 +302,27 @@ class SX1262Transceiver:
                     # Restore full-size, explicit-header RX after every transmit.
                     radio.setLoRaPacket(radio.HEADER_EXPLICIT, 12, MAX_RADIO_PAYLOAD, True, False)
                     if not radio.request():
-                        raise RuntimeError("SX1262 RX request rejected after standby; check SPI/BUSY")
+                        raise RuntimeError(
+                            "SX1262 RX request rejected after standby; check SPI/BUSY"
+                        )
                     rx_started = True
 
                 irq_status = radio.getIrqStatus()
+                if irq_status & ~_VALID_IRQ_MASK:
+                    raise RuntimeError(
+                        f"Invalid SX1262 IRQ=0x{irq_status:04x}: reserved bits set; "
+                        f"{_diagnostic_state(radio)}; check SPI/NSS wiring and clock speed"
+                    )
+                # request() returns True after issuing SetRx even if the chip
+                # did not enter RX. Verify it on entry and at every status report.
+                # Completed single RX may already be in standby with a terminal IRQ.
+                if verify_rx or now >= next_status:
+                    mode = radio.getMode()
+                    if mode != _RX_MODE and not irq_status & terminal_rx_irqs:
+                        raise RuntimeError(
+                            f"SX1262 is not in RX: mode=0x{mode:02x} "
+                            f"{_diagnostic_state(radio)}; check SPI/BUSY, power and TCXO"
+                        )
                 if now >= next_status:
                     LOG.info(
                         "LoRa listening rx_packets=%d header_errors=%d crc_errors=%d "
@@ -273,7 +331,7 @@ class SX1262Transceiver:
                         header_errors,
                         crc_errors,
                         "never" if last_rx is None else f"{now - last_rx:.1f}s ago",
-                        radio.getMode(),
+                        mode,
                         irq_status,
                     )
                     next_status = now + _STATUS_LOG_INTERVAL

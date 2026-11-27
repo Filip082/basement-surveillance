@@ -33,6 +33,8 @@ The default connection uses SPI0 CE0. GPIO labels below use **BCM numbering**, n
 
 RF_SW must be high during reception and low during transmission. DIO2 controls the module's internal TX switch; DIO3 supplies the TCXO, configured here at 1.8 V. DIO1 can remain disconnected because the service polls IRQ status over SPI. The driver adapters retain RESET and RF_SW ownership and leave NSS to hardware SPI. Connect the antenna before transmitting and use 3.3 V logic.
 
+The Pi SPI clock defaults to **1 MHz** rather than the upstream driver's 8 MHz, to allow more timing margin with individual wires. Change it with `--spi-speed` (100000–8000000 Hz). This does not change the LoRa carrier frequency or bandwidth.
+
 ### Enable SPI on the Raspberry Pi
 
 Run `sudo raspi-config`, select **Interface Options → SPI → Enable**, then reboot. Alternatively, add this setting under an applicable section such as `[all]` in `/boot/firmware/config.txt` (`/boot/config.txt` on older images):
@@ -97,6 +99,16 @@ LoRa listening rx_packets=0 header_errors=0 crc_errors=0 last_rx=never mode=0x50
 ```
 
 This confirms that the polling loop is running; it does not confirm a working RF link. `mode=0x50` means the SX1262 reports RX mode. Counters reset when the process restarts. `rx_packets` counts PHY-valid packets, including those later rejected by the application protocol. Header/CRC errors are counted separately, with each warning limited to once per 15 seconds. The receiver returns to standby before rearming after an error, and restores its full payload limit after sending feedback.
+
+`mode=0x20` means **standby**, so a stream of idle status lines with that value does not mean the chip is receiving. IRQ values may only use bits 0–9 (`0x03ff`); a value such as `0x2d2d` contains reserved bits and cannot be treated as an ordinary PHY header error. See the [Semtech SX1261/2 datasheet](https://cdn.sparkfun.com/assets/6/b/5/1/4/SX1262_datasheet.pdf), tables 13-29 and 13-76. Such values point to the SPI/command path and require checking the transport, clock, power and wiring before diagnosing the over-the-air link.
+
+Startup now reads back the programmed sync registers and prints `SX1262 SPI verified speed=1000000Hz sync_readback=0741`. This checks the register write/read, not the RF link. A mismatch, reserved IRQ bits, or a chip remaining in standby without a completed receive operation stops the loop with a hardware diagnosis. Mode failures include raw chip status and the full `device_errors` mask; error bits can include earlier latched faults. The pinned driver's truncated error helper is bypassed so both error bytes are retained.
+
+If this fails on the Pi, stop the container and check NSS → physical pin 24 (GPIO8/CE0), MISO → pin 21, MOSI → pin 19, SCK → pin 23, NRST → pin 15, BUSY → pin 16, 3.3 V and a common ground against the table above. Keep wires short and make sure another host or process is not driving the same radio. After updating the checkout, rebuild and try a slower SPI clock:
+
+```bash
+docker compose --profile hardware run --rm --no-deps --build border-router --no-http --spi-speed 500000
+```
 
 If the master reports `ENTRY`, repeated `END attempt` messages and `Feedback timeout`, its sender is running but has not received a valid ACK/NACK. With the default configuration each feedback wait lasts at least 20 seconds and there are up to eight END attempts; the one-second demo interval starts after that session finishes. For a silent link:
 
@@ -196,6 +208,7 @@ Both peers must use the same frequency, modulation, sync word, framing and low-d
 | Nominal TX power, dBm | `--tx-power` | `LORA_TX_POWER` | `14` |
 | TX duty-cycle fraction | `--duty-cycle` | `LORA_DUTY` | `0` (disabled for testing) |
 | RX quiet period, seconds | `--quiet-seconds` | — | `0.35` |
+| SPI clock, Hz | `--spi-speed` | `SPI_SPEED` | `1000000` |
 
 Other defaults: explicit LoRa headers, PHY CRC enabled, 12-symbol preamble and normal IQ. Supported bandwidths are 125/250/500 kHz; coding rates are 4/5 through 4/8. The pinned driver offers nominal SX1262 PA presets of 14, 17, 20 and 22 dBm. Its PA configuration and TX register setting work as a pair; do not overwrite only the TX register. Hardware capability does not imply permission to transmit at those powers.
 

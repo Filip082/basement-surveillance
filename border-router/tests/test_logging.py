@@ -107,6 +107,8 @@ class ReceiveLoggingTests(unittest.TestCase):
             None: Assertions distinguish signal reception from protocol rejection.
         """
         radio = MagicMock()
+        radio.readRegister.return_value = (0x07, 0x41)
+        radio.getMode.return_value = 0x50
         radio.begin.return_value = True
         radio.request.return_value = True
         radio.IRQ_RX_DONE = 0x0002

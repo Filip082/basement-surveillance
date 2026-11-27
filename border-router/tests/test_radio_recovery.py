@@ -33,6 +33,9 @@ class RadioRecoveryTests(unittest.TestCase):
         self.radio.snr.return_value = 7.25
         self.radio.getMode.return_value = 0x50
         self.radio.getIrqStatus.return_value = 0
+        self.radio.readRegister.return_value = (0x07, 0x41)
+        self.radio.getStatus.return_value = 0x24
+        self.radio._readBytes.return_value = (0x24, 0x00, 0x00)
         for name, value in {
             "STANDBY_RC": 0,
             "IRQ_RX_DONE": 0x0002,
@@ -175,6 +178,112 @@ class RadioRecoveryTests(unittest.TestCase):
                 MagicMock(side_effect=[False, True]), self.controller
             )
         self.radio.end.assert_called_once()
+
+    def test_invalid_irq_is_a_spi_failure_not_a_phy_header_error(self) -> None:
+        """Reject the reserved IRQ bits seen in the Pi's 0x2d2d response.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert corrupt SPI data never reaches the packet decoder.
+        """
+        self.radio.getIrqStatus.return_value = 0x2D2D
+        with (
+            patch.dict("sys.modules", self.modules),
+            self.assertRaisesRegex(RuntimeError, "Invalid SX1262 IRQ=0x2d2d: reserved bits"),
+        ):
+            SX1262Transceiver(RadioConfig()).run(lambda: False, self.controller)
+        self.radio.wait.assert_not_called()
+        self.controller.on_frame.assert_not_called()
+        self.radio.end.assert_called_once()
+
+    def test_sync_word_must_read_back_before_receiving(self) -> None:
+        """Fail startup when SPI cannot read back the configured synchronization registers.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert the expected and observed values are reported before RX starts.
+        """
+        self.radio.readRegister.return_value = (0x2D, 0x2D)
+        with (
+            patch.dict("sys.modules", self.modules),
+            self.assertRaisesRegex(RuntimeError, "register readback.*expected=0741.*actual=2d2d"),
+        ):
+            SX1262Transceiver(RadioConfig()).run(lambda: False, self.controller)
+        self.radio.request.assert_not_called()
+        self.radio.end.assert_called_once()
+
+    def test_failed_diagnostics_do_not_hide_the_invalid_irq(self) -> None:
+        """Preserve the original SPI diagnosis when subsequent status reads also fail.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert the invalid IRQ and secondary read failure are both reported.
+        """
+        self.radio.getIrqStatus.return_value = 0x2D2D
+        self.radio.getStatus.side_effect = IndexError("empty SPI response")
+        with (
+            patch.dict("sys.modules", self.modules),
+            self.assertRaisesRegex(RuntimeError, "IRQ=0x2d2d.*diagnostic_read_failed=IndexError"),
+        ):
+            SX1262Transceiver(RadioConfig()).run(lambda: False, self.controller)
+
+    def test_standby_is_not_reported_as_listening(self) -> None:
+        """Detect a rejected SetRx command even when request() returned True.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert standby produces a mode/device-error diagnosis instead of idle logs.
+        """
+        self.radio.getMode.return_value = 0x20
+        self.radio.getStatus.return_value = 0x2A
+        self.radio._readBytes.return_value = (0x2A, 0x01, 0x20)
+        with (
+            patch.dict("sys.modules", self.modules),
+            self.assertRaisesRegex(RuntimeError, "not in RX.*mode=0x20.*device_errors=0x0120"),
+        ):
+            SX1262Transceiver(RadioConfig()).run(lambda: False, self.controller)
+        self.controller.on_frame.assert_not_called()
+
+    def test_rx_mode_is_rechecked_when_idle(self) -> None:
+        """Detect a radio falling out of RX after its initial mode check passed.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert a later standby state cannot keep producing listening messages.
+        """
+        self.radio.getMode.side_effect = [0x50, 0x20]
+        with (
+            patch.dict("sys.modules", self.modules),
+            patch("src.radio.time.sleep"),
+            patch("src.radio.time.monotonic", side_effect=[0.0, 0.0, 15.0]),
+            self.assertRaisesRegex(RuntimeError, "not in RX.*mode=0x20"),
+        ):
+            SX1262Transceiver(RadioConfig()).run(lambda: False, self.controller)
+
+    def test_spi_clock_is_passed_to_the_driver(self) -> None:
+        """Apply the requested SPI clock rather than the upstream 8 MHz default.
+
+        Args:
+            None.
+
+        Returns:
+            None: Assert that a slower diagnostic clock reaches LoRaSpi.
+        """
+        with patch.dict("sys.modules", self.modules):
+            SX1262Transceiver(RadioConfig(spi_speed=500_000)).run(
+                MagicMock(side_effect=[False, True]), self.controller
+            )
+        self.modules["LoRaRF"].LoRaSpi.assert_called_once_with(0, 0, 500_000)
 
     def test_full_size_rx_is_restored_after_sending_short_feedback(self) -> None:
         """Receive full-size DATA after the driver sets its packet length for a short ACK.

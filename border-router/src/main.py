@@ -38,6 +38,12 @@ def run(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", default=os.getenv("BORDER_DB", "./router-v1.sqlite3"))
     ap.add_argument("--backend-url", default=os.getenv("BACKEND_URL", "http://127.0.0.1:8000"))
     ap.add_argument("--gpio-chip", type=int, default=os.getenv("GPIO_CHIP", "0"))
+    ap.add_argument(
+        "--spi-speed",
+        type=int,
+        default=os.getenv("SPI_SPEED", "1000000"),
+        help="SPI clock in Hz (default: 1000000 for wired connections)",
+    )
     ap.add_argument("--reset", type=int, default=os.getenv("RESET_GPIO", "22"))
     ap.add_argument("--busy", type=int, default=os.getenv("BUSY_GPIO", "23"))
     ap.add_argument("--rf-switch", type=int, default=os.getenv("RF_SWITCH_GPIO", "24"))
@@ -89,6 +95,7 @@ def run(argv: list[str] | None = None) -> int:
         forwarder = None if opts.no_http else HttpForwarder(opts.backend_url)
         cfg = RadioConfig(
             gpio_chip=opts.gpio_chip,
+            spi_speed=opts.spi_speed,
             reset_gpio=opts.reset,
             busy_gpio=opts.busy,
             rf_switch_gpio=opts.rf_switch,

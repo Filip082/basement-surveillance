@@ -183,6 +183,8 @@ class ContractTests(unittest.TestCase):
             {"reset_gpio": 23},
             {"sync_word": 0x12},
             {"poll_interval": float("nan")},
+            {"spi_speed": 0},
+            {"spi_speed": 8_000_001},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 RadioConfig(**kwargs)
@@ -271,6 +273,8 @@ class ContractTests(unittest.TestCase):
             None: Assertions raise on failure; unittest records the result.
         """
         radio = MagicMock()
+        radio.readRegister.return_value = (0x07, 0x41)
+        radio.getMode.return_value = 0x50
         radio.begin.return_value = True
         radio.request.return_value = True
         radio.IRQ_RX_DONE = 0x0002
