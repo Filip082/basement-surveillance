@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { downloadImage } = require('../services/imageService');
 const { getImageById, saveImageMetadata, getAllImages } = require('../services/imageRepository');
+const { sendAlertInBackground } = require('../notifier');
+const { photoAlert } = require('../notifier/alerts');
 
 const router = express.Router();
 
@@ -18,6 +20,8 @@ router.post('/', async (req, res) => {
             result.filePath,
             eventTimestamp
         );
+
+        sendAlertInBackground(photoAlert(eventTimestamp, result.filePath));
 
         res.status(200).json({
             status: 'success',

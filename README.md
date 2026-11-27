@@ -68,6 +68,8 @@ All configuration lives in `.env`. Every service in `docker-compose.yml` loads i
 | `PORT`                          | backend  | Port the API listens on inside the compose network       |
 | `DATABASE_URL`                  | backend  | Postgres connection string (built from the values above) |
 | `IMAGE_DIR`                     | backend  | Where photos are stored (the `images` volume)            |
+| `TEAMS_WEBHOOK_URL`             | backend  | Teams Workflows webhook for alerts (secret, never commit) |
+| `CAMERA_NAME`                   | backend  | Camera name shown in alerts                              |
 | `FRONTEND_PORT`                 | frontend | Vite dev server port, also published on your machine     |
 | `API_PROXY_TARGET`              | frontend | Where Vite forwards `/api` requests                      |
 
