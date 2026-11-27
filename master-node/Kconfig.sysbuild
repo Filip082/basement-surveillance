@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# nRF5340 has two cores: this application runs on the application core, the
+# Bluetooth controller must run on the network core. Sysbuild builds both images
+# (the network core one is Zephyr's hci_ipc sample) and flashes them together.
+# Single-core boards (xiao_ble) are not affected: NET_CORE_BOARD stays empty.
+
+source "share/sysbuild/Kconfig"
+
+config NET_CORE_BOARD
+	string
+	default "nrf5340dk/nrf5340/cpunet" if $(BOARD) = "nrf5340dk"
+
+config NET_CORE_IMAGE_HCI_IPC
+	bool "HCI IPC image on the network core"
+	default y
+	depends on NET_CORE_BOARD != ""

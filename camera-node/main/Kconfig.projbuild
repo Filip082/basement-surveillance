@@ -1,0 +1,252 @@
+menu "Camera node"
+
+    config NODE_WAKE_GPIO
+        int "Wake-up input GPIO"
+        range 0 21
+        default 10
+        help
+            Light-sleep wake-up input. GPIO10 is the SD_CS line of the unused
+            microSD socket on the DFR1154 (keep the socket empty).
+
+    config NODE_DEBUG_POLL_INSTEAD_OF_SLEEP
+        bool "Bench debugging: poll the wake pin instead of sleeping"
+        default n
+        help
+            Light sleep switches the USB serial/JTAG port off, so the serial
+            monitor disconnects (and the monitor's reconnect resets the chip).
+            Enable this to test the whole cycle with live logs; the node then
+            waits for the wake pin by polling (high power). Disable for real use.
+
+    config NODE_WAKE_LED_BLINK
+        bool "Blink the on-board LED (GPIO3) for 60 ms after every light-sleep wake-up"
+        default y
+        help
+            The USB serial port is off during light sleep, so this is the way to see
+            that the wake-up happened. Disable it for the final battery build.
+
+    config NODE_DEBUG_LED_STEPS
+        bool "Debug: show cycle progress on the LED (needs LOGS_ENABLED)"
+        default y
+        help
+            After each cycle step 6..13 the LED blinks (step-5) times, and one long
+            blink at step 14 (back to sleep). Where the blinking stops is where the
+            node got stuck. Adds ~10 s per cycle: disable for real use.
+
+    config NODE_WAKE_ACTIVE_LOW
+        bool "Wake-up line is active LOW"
+        default n
+        help
+            Off: the event drives the pin HIGH (internal pull-down keeps it low
+            when idle). On: the event pulls the pin LOW (internal pull-up).
+            Wake-up is level triggered: the line must go back to idle before the
+            node can sleep again.
+
+    config NODE_CAMERA_XCLK_MHZ
+        int "Camera XCLK (MHz)"
+        range 5 24
+        default 10
+        help
+            10 MHz is known-good on this board. Higher = faster frames = faster
+            capture. If you see "cam_hal: FB-OVF" or garbled frames, lower it.
+
+    config NODE_CAMERA_VFLIP
+        bool "Flip image vertically"
+        default y
+
+    config NODE_CAMERA_HMIRROR
+        bool "Mirror image horizontally"
+        default n
+
+    config NODE_BLE_DEVICE_NAME
+        string "BLE device name"
+        default "DFR1154-CAM"
+
+    config NODE_BLE_CONNECT_TIMEOUT_MS
+        int "Wait for the computer to connect after waking (ms)"
+        range 1000 120000
+        default 10000
+        help
+            Advertising stops and the node goes back to sleep after this time
+            if no paired computer connected and subscribed.
+
+    config NODE_BLE_PAIRING_WINDOW_S
+        int "Pairing window after power-up / BOOT held (seconds)"
+        range 5 600
+        default 60
+        help
+            At power-up with no paired computer (or with BOOT held) the node
+            advertises this long so you can pair it.
+
+    config NODE_BLE_ACK_TIMEOUT_MS
+        int "Wait for the computer's ACK after sending (ms)"
+        range 100 10000
+        default 2000
+        help
+            The receiver confirms a complete frame; the node disconnects right
+            away. A receiver that cannot ACK costs this much extra awake time.
+
+    config NODE_BLE_REQUIRE_ENCRYPTION
+        bool "Only send images over a paired (encrypted) link"
+        default y
+
+    choice NODE_BLE_PAIRING_METHOD
+        prompt "Pairing method"
+        default NODE_BLE_PAIRING_JUST_WORKS
+        help
+            Just Works: no PIN, anyone in range who pairs first is accepted.
+            Fixed passkey: the computer must enter the PIN below (protects
+            against strangers, but the bleak-based tools/receiver.py on
+            Windows cannot type PINs - pair via the Windows Bluetooth settings).
+
+        config NODE_BLE_PAIRING_JUST_WORKS
+            bool "Just Works"
+        config NODE_BLE_PAIRING_PASSKEY
+            bool "Fixed passkey"
+    endchoice
+
+    config NODE_BLE_PASSKEY
+        int "Fixed passkey (6 digits)"
+        range 0 999999
+        default 123456
+        depends on NODE_BLE_PAIRING_PASSKEY
+
+    menu "Face detection"
+
+        config NODE_FACE_DETECT
+            bool "Detect people / faces and mark them with a frame before sending"
+            default y
+            help
+                After the wake-up the node takes pictures until a face is found (or the
+                search window is over), frames what it found and sends the picture with
+                a status: face detected / human detected / no human detected.
+                Uses espressif/pedestrian_detect and espressif/human_face_detect (int8,
+                a few MB of flash in total). Disable to send one plain picture.
+
+        config NODE_PERSON_DETECT
+            bool "Look for a person first, check for a face only when one is found"
+            default y
+            depends on NODE_FACE_DETECT
+            help
+                Order: person? no -> next picture; yes -> face? yes -> send "face detected";
+                no -> keep this picture and try again until the window is over, then send it
+                as "human detected". Off: only faces are searched (status face / none).
+
+        config NODE_FACE_WITHOUT_PERSON
+            bool "Also check for a face when no person was found"
+            default n
+            depends on NODE_PERSON_DETECT
+            help
+                The person model is trained on whole bodies: a face close to the camera or a
+                partly visible person may be missed by it, and the face check would then never
+                run. Turn this on to run the face check on every picture (about 40 ms more).
+
+        config NODE_PERSON_MIN_SCORE_PCT
+            int "Minimum person confidence (percent)"
+            default 50
+            range 10 95
+            depends on NODE_PERSON_DETECT
+
+        config NODE_FACE_MIN_SCORE_PCT
+            int "Minimum face confidence (percent)"
+            default 50
+            range 10 95
+            depends on NODE_FACE_DETECT
+
+        config NODE_PERSON_DRAW_BOX
+            bool "Draw a frame around people when no face was found"
+            default y
+            depends on NODE_PERSON_DETECT
+
+        config NODE_PERSON_BOX_COLOR
+            hex "Person frame colour (0xRRGGBB)"
+            default 0xFFFF00
+            range 0x000000 0xFFFFFF
+            depends on NODE_PERSON_DRAW_BOX
+
+        config NODE_FACE_BOX_COLOR
+            hex "Face frame colour (0xRRGGBB)"
+            default 0x00FF00
+            range 0x000000 0xFFFFFF
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_BOX_THICKNESS
+            int "Frame thickness (pixels)"
+            default 3
+            range 1 20
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_RETRY_INTERVAL_MS
+            int "Time between two pictures while searching (ms, from the start of the last one)"
+            default 500
+            range 0 5000
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_WINDOW_MS
+            int "Give up searching this long after the wake-up (ms)"
+            default 5000
+            range 500 30000
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_RETRY_SETTLE_FRAMES
+            int "Frames skipped before each retry picture (so it is a fresh one)"
+            default 1
+            range 0 5
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_JPEG_QUALITY
+            int "JPEG quality of the picture with the frame drawn in (1-100, higher = better)"
+            default 80
+            range 10 100
+            depends on NODE_FACE_DETECT
+
+        config NODE_FACE_ENCODER_BGR
+            bool "JPEG encoder expects BGR byte order (swap red/blue before encoding)"
+            default y
+            depends on NODE_FACE_DETECT
+            help
+                The esp32-camera JPEG encoder treats RGB888 as BGR. If the frame comes out
+                blue when you asked for red (colours swapped), flip this option.
+    endmenu
+
+    menu "Battery monitor"
+
+        config NODE_BATTERY_REQUEST_MS
+            int "Wake line LOW for longer than this = battery request (ms)"
+            default 200
+            range 20 5000
+            help
+                Wake-up by a LOW pulse on the wake pin: a pulse SHORTER than this takes a
+                picture, a pulse LONGER than this reports the battery. The master must send
+                e.g. 50 ms for a picture and 300 ms for the battery.
+
+        config NODE_BATTERY_ADC_GPIO
+            int "Battery voltage input GPIO (must be ADC capable: 1..20 on the ESP32-S3)"
+            default 11
+            range 1 20
+            help
+                Connect the battery through a resistor divider (and about 100 nF to GND at the
+                pin). Must not be a GPIO used by the camera, the LED, IR or the wake input.
+                GPIO11 is the unused SD card MOSI line on the DFR1154.
+
+        config NODE_BATTERY_DIVIDER_X100
+            int "Divider ratio x100 (battery voltage / pin voltage x 100)"
+            default 400
+            range 100 2000
+            help
+                1/4 divider = 400. Keep the pin below about 3.1 V at full battery.
+
+        config NODE_BATTERY_MIN_MV
+            int "Battery voltage that counts as 0 % (millivolt, BATTERY side of the divider)"
+            default 6000
+
+        config NODE_BATTERY_MAX_MV
+            int "Battery voltage that counts as 100 % (millivolt, BATTERY side of the divider)"
+            default 8400
+
+        config NODE_BATTERY_SAMPLES
+            int "ADC samples averaged per measurement"
+            default 16
+            range 1 128
+    endmenu
+
+endmenu
