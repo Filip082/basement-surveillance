@@ -61,20 +61,23 @@ static int input_init(const struct gpio_dt_spec *spec, struct gpio_callback *cb,
 		      gpio_callback_handler_t isr)
 {
 	if (!gpio_is_ready_dt(spec)) {
-		LOG_ERR("input GPIO controller not ready");
-		return -ENODEV;
-	}
-	int err = gpio_pin_configure_dt(spec, GPIO_INPUT);
+        LOG_ERR("input GPIO controller not ready");
+        return -ENODEV;
+    }
 
-	if (err) {
-		return err;
-	}
-	gpio_init_callback(cb, isr, BIT(spec->pin));
-	err = gpio_add_callback(spec->port, cb);
-	if (err) {
-		return err;
-	}
-	return gpio_pin_interrupt_configure_dt(spec, GPIO_INT_EDGE_TO_ACTIVE);
+    // PCF8575: nie konfigurujemy GPIO_INPUT
+    // ze wzgledu na blad sterownika w Zephyr 4.4.2.
+
+    gpio_init_callback(cb, isr, BIT(spec->pin));
+
+    int err = gpio_add_callback(spec->port, cb);
+    if (err) {
+        return err;
+    }
+
+    return gpio_pin_interrupt_configure_dt(
+        spec, GPIO_INT_EDGE_TO_ACTIVE
+    );
 }
 
 int main(void)
@@ -138,17 +141,18 @@ int main(void)
 
                 /* take_image(): unchanged BLE, 30 ms low on PCF8575 P06
                  * (CONFIG_APP_IMAGE_WAKE_PULSE_MS=30 on XIAO only). */
-                if (take_image()) {
+                /*if (take_image()) {
                     const struct stored_image *img = get_image();
                     if (img != NULL) {
-                        /* >>> picture is in RAM: img->data, img->len, img->status. <<< */
+                        // >>> picture is in RAM: img->data, img->len, img->status. <<< 
                         LOG_INF("image ready: %u bytes, %s", img->len,
                                 image_status_str(img->status));
                     }
-                }
+                }*/
             } else {
                 LOG_DBG("PCF interrupt ignored: PIR is LOW");
             }
+		   LOG_DBG("PIR detected.");
         }
 
     }
