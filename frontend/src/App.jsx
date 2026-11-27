@@ -27,6 +27,11 @@ function App() {
   const [newStorageLimit, setNewStorageLimit] = useState(16)
   const [showStorageConfirm, setShowStorageConfirm] = useState(false)
   const [storageSaving, setStorageSaving] = useState(false)
+  const [filterFrom, setFilterFrom] = useState('')
+  const [filterTo, setFilterTo] = useState('')
+  const [filterLoading, setFilterLoading] = useState(false)
+  const [dateError, setDateError] = useState('')
+  const [showImageFilter, setShowImageFilter] = useState(false)
 
   const [viewMode, setViewMode] = useState('list')
   const [pageSize, setPageSize] = useState(10)
@@ -125,27 +130,55 @@ function App() {
       setStorageSaving(false)
     }
   }
-  useEffect(() => {
-    async function fetchImages() {
-      try {
-        const response = await fetch('/api/images')
-
-        if (!response.ok) {
-          throw new Error('Nie udało się pobrać zdjęć')
-        }
-
-        const data = await response.json()
-        setImages(data.images)
-
-      } catch (error) {
-        console.error('Image loading failed:', error)
-        setError(error.message)
-
-      } finally {
-        setLoading(false)
+    function validateDateRange(from, to) {
+      if (from && to && new Date(to) < new Date(from)) {
+        setDateError('Data końcowa nie może być wcześniejsza niż data początkowa.')
+        return false
       }
-    }
 
+      setDateError('')
+      return true
+    }
+    async function fetchImages(from = '', to = '') {
+    setFilterLoading(true)
+
+    try {
+      const params = new URLSearchParams()
+
+      if (from) {
+        params.set('from', new Date(from).toISOString())
+      }
+
+      if (to) {
+        params.set('to', new Date(to).toISOString())
+      }
+
+      const query = params.toString()
+      const url = query ? `/api/images?${query}` : '/api/images'
+
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        throw new Error('Nie udało się pobrać zdjęć')
+      }
+
+      const data = await response.json()
+
+      setImages(data.images)
+      setCurrentPage(1)
+      setSelectedImage(null)
+      setError(null)
+
+    } catch (error) {
+      console.error('Image loading failed:', error)
+      setError(error.message)
+
+    } finally {
+      setLoading(false)
+      setFilterLoading(false)
+    }
+  }
+    useEffect(() => {
     fetchImages()
   }, [])
 
@@ -439,6 +472,79 @@ function App() {
           </section>
         </div>
       )}
+        <div className="image-filter">
+          <button
+            type="button"
+            className="image-filter-toggle"
+            onClick={() => setShowImageFilter(!showImageFilter)}
+          >
+            <span>Filtrowanie zdjęć</span>
+            <span className={`filter-arrow ${showImageFilter ? 'open' : ''}`}>
+              ▼
+            </span>
+          </button>
+
+          {showImageFilter && (
+          <div className="image-filter-content">
+            <div className="image-filter-controls">
+                  <div className="image-filter-field">
+                    <label htmlFor="filterFrom">Od:</label>
+                    <input
+                      type="datetime-local"
+                      id="filterFrom"
+                      value={filterFrom}
+                      onChange={(event) => {
+                        setFilterFrom(event.target.value)
+                        validateDateRange(event.target.value, filterTo)
+                      }}
+                    />
+                  </div>
+
+                  <div className="image-filter-field">
+                    <label htmlFor="filterTo">Do:</label>
+                    <input
+                      type="datetime-local"
+                      id="filterTo"
+                      value={filterTo}
+                      onChange={(event) => {
+                        setFilterTo(event.target.value)
+                        validateDateRange(filterFrom, event.target.value)
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fetchImages(filterFrom, filterTo)}
+                    disabled={filterLoading || !!dateError}
+                  >
+                    {filterLoading ? 'Filtrowanie...' : 'Filtruj'}
+                  </button>
+
+                  <button
+                    type="button"
+                      onClick={() => {
+                        setFilterFrom('')
+                        setFilterTo('')
+                        setDateError('')
+                        fetchImages('', '')
+                      }}
+                    disabled={filterLoading}
+                  >
+                    Wyczyść filtr
+                  </button>
+                    {dateError && (
+                      <div className="date-filter-warning">
+                        <strong>Uwaga! </strong> 
+                        <p>Data końcowa nie może być wcześniejsza
+                        niż data początkowa.</p>
+                      </div>
+                    )}
+                </div>
+
+          </div>
+          )}
+
+      </div>
       <div className="gallery-toolbar">
         <div className="view-controls">
           <button

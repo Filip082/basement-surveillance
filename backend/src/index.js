@@ -5,6 +5,7 @@ const { initializeTelemetry } = require('./services/telemetryService');
 const entranceRouter = require('./routes/entrance');
 const imagesRouter = require('./routes/images');
 const telemetryRouter = require('./routes/telemetry');
+const storageRouter = require('./routes/storage');
 
 const app = express();
 app.use(express.json());
@@ -21,6 +22,7 @@ app.get('/health', (req, res) => {
 app.use('/entrance', entranceRouter);
 app.use('/images', imagesRouter);
 app.use('/telemetry', telemetryRouter);
+app.use('/storage', storageRouter);
 
 /////////////////////////////////////////////////////
 const path = require('path');

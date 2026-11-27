@@ -842,3 +842,153 @@ main {
 .gallery-card {
   border: 2px solid #13283c;
 }
+
+/* ==========================================
+   FILTROWANIE ZDJĘĆ
+   ========================================== */
+
+.image-filter {
+  margin: 24px 0;
+  padding: 20px;
+  background: #172a40;
+  border: 1px solid #344e68;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.image-filter h2 {
+  margin: 0 0 16px;
+  color: #f1f5f9;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.image-filter-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.image-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.image-filter-field label {
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.image-filter-field input {
+  padding: 9px 12px;
+  color: #ffffff;
+  background: #13283c;
+  border: 1px solid #46617e;
+  border-radius: 8px;
+  font-size: 13px;
+  color-scheme: dark;
+}
+
+.image-filter-field input:focus {
+  outline: none;
+  border-color: #67c8d4;
+  box-shadow: 0 0 0 3px rgba(103, 200, 212, 0.2);
+}
+
+.image-filter-controls button {
+  padding: 10px 16px;
+  color: #062b2b;
+  background: #5eead4;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.image-filter-controls button:hover:not(:disabled) {
+  color: #ffffff;
+  background: #0f766e;
+}
+
+.image-filter-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+  .image-filter-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .image-filter-field input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+.date-filter-warning {
+  width: 100%;
+  padding: 10px 12px;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+
+.image-filter-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0;
+  color: #f1f5f9;
+  background: transparent;
+  border: none;
+  font-size: 17px;
+  font-weight: 650;
+  cursor: pointer;
+  text-align: left;
+}
+
+.filter-arrow {
+  font-size: 13px;
+  transition: transform 0.2s ease;
+}
+
+.filter-arrow.open {
+  transform: rotate(180deg);
+}
+
+.image-filter-content {
+  margin-top: 18px;
+}
+
+
+.date-filter-warning {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-top: 12px;
+  padding: 9px 12px;
+  color: #fcd34d;
+  background: rgba(180, 83, 9, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.date-filter-warning {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}

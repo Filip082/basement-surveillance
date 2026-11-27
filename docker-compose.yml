@@ -30,6 +30,7 @@ services:
       - /app/node_modules
       - images:/data/images
       - telemetry-logs:/data/logs
+      - storage-settings:/data/settings
     env_file:
       - .env
     environment:
@@ -61,3 +62,4 @@ volumes:
   db-data:
   images:
   telemetry-logs:
+  storage-settings:
