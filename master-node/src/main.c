@@ -1,13 +1,9 @@
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
- * Example main(): sleep until a trigger input is activated, then ask the camera node for
- * a picture (Button 1) or for its battery level (Button 2). Everything camera related is behind camera_node.h
- * (take_image() / get_image()); the rest of the product plugs in where marked.
- *
- * The trigger is Button 1 on the nRF5340 DK; in the final product it is a line from
- * another MCU - only the devicetree overlay changes. Between triggers the CPU
- * sleeps in the Zephyr idle thread (System ON, RAM kept).
+ * PIR is connected to PCF8575 P04, and the expander /INT line wakes the nRF.
+ * Camera image reception remains in camera_node.c. The 12:00 event uses
+ * a Zephyr timer after the local clock has been synchronized.
  */
 
 #include <errno.h>
@@ -16,54 +12,49 @@
 #include <zephyr/logging/log.h>
 
 #include "camera_node.h"
+#include "cam_wake.h"
+#include "noon_clock.h"
 
 LOG_MODULE_REGISTER(master_node, LOG_LEVEL_DBG);
 
-BUILD_ASSERT(DT_NODE_HAS_PROP(DT_PATH(zephyr_user), trigger_gpios),
-	     "the board overlay must define zephyr,user trigger-gpios");
-BUILD_ASSERT(DT_NODE_HAS_PROP(DT_PATH(zephyr_user), battery_trigger_gpios),
-	     "the board overlay must define zephyr,user battery-trigger-gpios");
+/* Existing on-board LED (active-low physically on the XIAO). */
+static const struct gpio_dt_spec status_led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 
-/* trigger = "take a picture" (Button 1), battery trigger = "report the battery" (Button 2) */
-static const struct gpio_dt_spec trigger = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), trigger_gpios);
-static const struct gpio_dt_spec battery_trigger =
-	GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), battery_trigger_gpios);
-static struct gpio_callback trigger_cb_data;
-static struct gpio_callback battery_cb_data;
-static K_SEM_DEFINE(trigger_sem, 0, 1);
+/* A short LED indication without delaying the camera request. */
+static void status_led_off(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    (void)gpio_pin_set_dt(&status_led, 0);
+}
 
-#define REQ_IMAGE   0   /* bit numbers in `requests` */
-#define REQ_BATTERY 1
+K_WORK_DELAYABLE_DEFINE(status_led_off_work, status_led_off);
+
+BUILD_ASSERT(DT_NODE_HAS_PROP(DT_PATH(zephyr_user), pir_gpios),
+             "the board overlay must define zephyr,user pir-gpios");
+
+/* Real PIR input on PCF8575 P04; /INT is wired to XIAO D0. */
+static const struct gpio_dt_spec pir = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), pir_gpios);
+static struct gpio_callback pir_cb_data;
+static K_SEM_DEFINE(event_sem, 0, 1);
+
+#define REQ_IMAGE 0
+#define REQ_NOON  1
 static atomic_t requests;
 
-#define TRIGGER_DEBOUNCE_MS 300
+#define PIR_DEBOUNCE_MS 300
 
-/* Interrupt: a trigger edge. Debounced; wakes the main thread. */
+/* PIR input change callback: debounced; wakes the main thread. */
 static void trigger_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins)
 {
 	static int64_t last_ms;
 	int64_t now = k_uptime_get();
 
-	if (now - last_ms < TRIGGER_DEBOUNCE_MS) {
+	if (now - last_ms < PIR_DEBOUNCE_MS) {
 		return;
 	}
 	last_ms = now;
 	atomic_set_bit(&requests, REQ_IMAGE);
-	k_sem_give(&trigger_sem);
-}
-
-/* Interrupt: battery button. Debounced like the picture trigger. */
-static void battery_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins)
-{
-	static int64_t last_ms;
-	int64_t now = k_uptime_get();
-
-	if (now - last_ms < TRIGGER_DEBOUNCE_MS) {
-		return;
-	}
-	last_ms = now;
-	atomic_set_bit(&requests, REQ_BATTERY);
-	k_sem_give(&trigger_sem);
+	k_sem_give(&event_sem);
 }
 
 static int input_init(const struct gpio_dt_spec *spec, struct gpio_callback *cb,
@@ -88,33 +79,78 @@ static int input_init(const struct gpio_dt_spec *spec, struct gpio_callback *cb,
 
 int main(void)
 {
-	LOG_INF("master-node up on %s", CONFIG_BOARD_TARGET);
+    LOG_INF("master-node up on %s", CONFIG_BOARD_TARGET);
 
-	if (camera_node_init() || input_init(&trigger, &trigger_cb_data, trigger_isr) ||
-	    input_init(&battery_trigger, &battery_cb_data, battery_isr)) {
-		LOG_ERR("setup failed - check the board overlay");
-		return 0;
-	}
+    /* PCF8575 is initialized by Zephyr. Its /INT line is on XIAO D0. */
+    if (!gpio_is_ready_dt(&status_led) ||
+        gpio_pin_configure_dt(&status_led, GPIO_OUTPUT_INACTIVE) != 0) {
+        LOG_ERR("status LED not ready");
+        return -ENODEV;
+    }
 
-	for (;;) {
-		LOG_INF("sleeping until the trigger input is activated");
-		k_sem_take(&trigger_sem, K_FOREVER);
+    /* No changes to BLE initialization or camera_node_* functions. */
+    if (camera_node_init() || input_init(&pir, &pir_cb_data, trigger_isr)) {
+        LOG_ERR("setup failed - check the board overlay / PCF INT on D0");
+        return -ENODEV;
+    }
 
-		if (atomic_test_and_clear_bit(&requests, REQ_IMAGE) && take_image()) {
-			const struct stored_image *img = get_image();
+    /* Clear any pending PCF8575 change and establish an initial PIR state. */
+    int initial_pir = gpio_pin_get_dt(&pir);
+    if (initial_pir < 0) {
+        LOG_ERR("PIR initial read over I2C failed: %d", initial_pir);
+        return initial_pir;
+    }
 
-			/* >>> picture is in RAM: img->data, img->len, img->status. Hand it to the
-			 *     next stage here (LoRa, ...). Valid until the next take_image(). <<< */
-			LOG_INF("image ready: %u bytes, %s", img->len, image_status_str(img->status));
-		}
+    if (noon_clock_init(&event_sem, &requests, REQ_NOON) != 0) {
+        LOG_ERR("RTC timer initialization failed");
+        return -EINVAL;
+    }
 
-		if (atomic_test_and_clear_bit(&requests, REQ_BATTERY)) {
-			struct battery_info bat;
+#if CONFIG_APP_RTC_BOOT_HOUR >= 0
+    /* Demonstration only: requires an actually known local time at power-on. */
+    (void)noon_clock_set_local_time(CONFIG_APP_RTC_BOOT_HOUR,
+                                    CONFIG_APP_RTC_BOOT_MINUTE,
+                                    CONFIG_APP_RTC_BOOT_SECOND);
+#else
+    LOG_WRN("No wall clock: noon alarm unarmed; sync with noon_clock_set_local_time()");
+#endif
 
-			if (read_battery(&bat)) {
-				LOG_INF("camera node battery: %u %% (%u mV)", bat.percent, bat.battery_mv);
-			}
-		}
-	}
-	return 0;
+    while(true) { //nie zgadzam się na żadne for(;;)
+        LOG_INF("sleeping until PIR / RTC event");
+        k_sem_take(&event_sem, K_FOREVER);
+
+        /* Timeout callback does not access I2C. Handle the alarm here. */
+        if (atomic_test_and_clear_bit(&requests, REQ_NOON)) {
+            LOG_INF("RTC noon alarm: camera wake pulse 80 ms");
+            cam_wake_pulse(80);
+        }
+
+        if (atomic_test_and_clear_bit(&requests, REQ_IMAGE)) {
+            /* Zephyr 4.4 PCF857x callbacks signal BOTH edges regardless
+             * of requested trigger. Only PIR HIGH may request an image. */
+            int pir_state = gpio_pin_get_dt(&pir);
+            if (pir_state < 0) {
+                LOG_ERR("PIR read failed: %d", pir_state);
+            } else if (pir_state == 1) {
+                /* Preserve the LED indication on a valid interrupt. */
+                (void)gpio_pin_set_dt(&status_led, 1);
+                (void)k_work_reschedule(&status_led_off_work, K_SECONDS(2));
+
+                /* take_image(): unchanged BLE, 30 ms low on PCF8575 P06
+                 * (CONFIG_APP_IMAGE_WAKE_PULSE_MS=30 on XIAO only). */
+                if (take_image()) {
+                    const struct stored_image *img = get_image();
+                    if (img != NULL) {
+                        /* >>> picture is in RAM: img->data, img->len, img->status. <<< */
+                        LOG_INF("image ready: %u bytes, %s", img->len,
+                                image_status_str(img->status));
+                    }
+                }
+            } else {
+                LOG_DBG("PCF interrupt ignored: PIR is LOW");
+            }
+        }
+
+    }
+    return 0;
 }

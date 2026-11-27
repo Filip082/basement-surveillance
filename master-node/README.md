@@ -1,5 +1,13 @@
 # master-node
 
+> **Uwaga (aktualna wersja XIAO):** Testowe wejscia `trigger-gpios` i
+> `battery-trigger-gpios` zostaly usuniete. PIR jest podlaczony do PCF8575 P04
+> (`pir-gpios`), jego /INT do XIAO D0, a wybudzanie kamery do PCF P06.
+> Glowny watek reaguje na PIR i zdarzenie RTC, nie na przyciski testowe.
+> Nie zmieniono BLE ani funkcji `read_battery()`; ponizszy opis przyciskow
+> dotyczy starszej wersji demonstracyjnej. Aktualne polaczenia sa w
+> `README_PCF8575_RTC.md`.
+
 Zephyr v4.4.2 firmware that **wakes the camera node, receives its picture over
 Bluetooth LE and keeps it in RAM**. Developed on the **nRF5340 DK**, to be ported to the
 **XIAO nRF52840** (+ Wio-SX1262 LoRa) which is the final hardware. Both boards build from
