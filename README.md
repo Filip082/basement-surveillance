@@ -25,7 +25,7 @@ The link between camera-node and master-node is not decided yet.
 | Dir              | What                                                     | Tech                         |
 |------------------|----------------------------------------------------------|------------------------------|
 | `camera-node/`   | Takes the photo                                          | DFRobot DFR1154, ESP-IDF 6.1 |
-| `master-node/`   | Sends data over LoRa, handles sensors                    | XIAO nRF52840 + Wio-SX1262, Zephyr 4.4 |
+| `master-node/`   | Sends data over LoRa, handles sensors                    | XIAO nRF52840 + Wio-SX1262, Zephyr 4.5 |
 | `border-router/` | Receives LoRa, forwards events to the backend            | Python                       |
 | `backend/`       | REST API, stores events and images                       | Node 24, Express 5           |
 | `frontend/`      | Web app for browsing events                              | React, Vite                  |

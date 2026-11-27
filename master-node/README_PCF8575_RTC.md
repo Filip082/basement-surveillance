@@ -57,7 +57,7 @@ jesli ma inny adres i zgodne napiecia. I2C nie uzywa slave-select.
 
 Uwaga: PCF8575 reaguje na obydwa zbocza. Przy bardzo krotkich impulsach
 PIR zmiana moze zniknac, zanim PCF zostanie odczytany po I2C.
-Sterownik PCF857x 4.4 moze rowniez skasowac INT przy zapisie do portu.
+Sterownik PCF857x (Zephyr 4.5) moze rowniez skasowac INT przy zapisie do portu.
 To rozwiazanie przeznaczone jest do PIR generujacego sygnal HIGH przez
 stosunkowo dlugi czas, nie do impulsow mikrosekundowych.
 

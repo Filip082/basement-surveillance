@@ -1,5 +1,5 @@
 {
-  "name": "master-node (Zephyr v4.4.2)",
+  "name": "master-node (Zephyr v4.5.0)",
   "build": {
     "dockerfile": "Dockerfile"
   },

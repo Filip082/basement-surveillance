@@ -8,7 +8,7 @@
 > dotyczy starszej wersji demonstracyjnej. Aktualne polaczenia sa w
 > `README_PCF8575_RTC.md`.
 
-Zephyr v4.4.2 firmware that **wakes the camera node, receives its picture over
+Zephyr v4.5.0 firmware that **wakes the camera node, receives its picture over
 Bluetooth LE and keeps it in RAM**. Developed on the **nRF5340 DK**, to be ported to the
 **XIAO nRF52840** (+ Wio-SX1262 LoRa) which is the final hardware. Both boards build from
 this one folder.
@@ -288,7 +288,7 @@ Everything board specific is in `boards/`. Final steps:
 
 ## Unverified assumptions
 
-* Zephyr 4.4.2 API/Kconfig names were written from knowledge of 4.x, nothing was compiled.
+* Zephyr 4.5.0 API/Kconfig names were written from knowledge of 4.x, nothing was compiled.
   Likely trouble spots: `sysbuild.cmake` / `Kconfig.sysbuild` (copied from Zephyr's
   `peripheral_hr` sample pattern), missing west modules, a renamed Bluetooth Kconfig symbol.
   Fallback for the network core: build `$ZEPHYR_BASE/samples/bluetooth/hci_ipc` for

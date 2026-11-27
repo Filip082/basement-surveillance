@@ -4,7 +4,7 @@
 FROM debian:trixie-slim
 
 # Keep in sync with west.yml (Zephyr) and zephyr/SDK_VERSION (SDK)
-ARG ZEPHYR_VERSION=v4.4.2
+ARG ZEPHYR_VERSION=v4.5.0
 ARG ZEPHYR_SDK_VERSION=1.0.1
 ARG USERNAME=dev
 

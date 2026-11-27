@@ -262,9 +262,13 @@ static void start_mtu_exchange(void)
 static void security_fallback_work(struct k_work *work)
 {
 	if (s.conn && s.phase == PH_SECURING) {
-		LOG_INF("camera did not start pairing, requesting security ourselves");
-		int err = bt_conn_set_security(s.conn, BT_SECURITY_L2);
+		/* own reference: disconnected_cb() may run concurrently (see ack_work_fn) */
+		struct bt_conn *conn = bt_conn_ref(s.conn);
 
+		LOG_INF("camera did not start pairing, requesting security ourselves");
+		int err = bt_conn_set_security(conn, BT_SECURITY_L2);
+
+		bt_conn_unref(conn);
 		if (err) {
 			LOG_ERR("bt_conn_set_security failed: %d", err);
 		}
@@ -387,7 +391,12 @@ static void discover_start(void)
 /* System work queue: write the ACK / NAK (not from the Bluetooth thread). */
 static void ack_work_fn(struct k_work *work)
 {
-	struct bt_conn *conn = s.conn;
+	/*
+	 * Since Zephyr 4.5 disconnected_cb() runs on the Bluetooth RX thread, not on the
+	 * system workqueue, so it can drop s.conn while the write below blocks. Hold our
+	 * own reference for the duration of the call.
+	 */
+	struct bt_conn *conn = s.conn ? bt_conn_ref(s.conn) : NULL;
 	uint8_t v = s.ack_value;
 
 	if (!conn) {
@@ -395,6 +404,7 @@ static void ack_work_fn(struct k_work *work)
 	}
 	int err = bt_gatt_write_without_response(conn, s.h_ctrl, &v, 1, false);
 
+	bt_conn_unref(conn);
 	if (err) {
 		LOG_ERR("could not write control byte 0x%02x: %d", v, err);
 		finish(CAMLINK_FAILED);

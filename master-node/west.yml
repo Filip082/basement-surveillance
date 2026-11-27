@@ -11,13 +11,12 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: v4.4.2
+      revision: v4.5.0
       import:
         name-allowlist:
           - cmsis_6
           - hal_nordic
           - loramac-node
-          - tinycrypt      # Bluetooth LE Secure Connections (ECC)
           - mbedtls        # crypto backend used by the Bluetooth host in recent Zephyr
           - open-amp       # nRF5340: IPC between the application and network core
           - libmetal       # needed by open-amp
