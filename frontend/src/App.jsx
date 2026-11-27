@@ -27,8 +27,10 @@ function App() {
   const [newStorageLimit, setNewStorageLimit] = useState(16)
   const [showStorageConfirm, setShowStorageConfirm] = useState(false)
   const [storageSaving, setStorageSaving] = useState(false)
-  const [filterFrom, setFilterFrom] = useState('')
-  const [filterTo, setFilterTo] = useState('')
+  const [filterFromDate, setFilterFromDate] = useState('')
+  const [filterFromTime, setFilterFromTime] = useState('')
+  const [filterToDate, setFilterToDate] = useState('')
+  const [filterToTime, setFilterToTime] = useState('')
   const [filterLoading, setFilterLoading] = useState(false)
   const [dateError, setDateError] = useState('')
   const [showImageFilter, setShowImageFilter] = useState(false)
@@ -130,54 +132,62 @@ function App() {
       setStorageSaving(false)
     }
   }
-    function validateDateRange(from, to) {
-      if (from && to && new Date(to) < new Date(from)) {
-        setDateError('Data końcowa nie może być wcześniejsza niż data początkowa.')
-        return false
+    function validateDateRange(fromDate, toDate) {
+      if (fromDate && toDate) {
+        const from = new Date(
+          fromDate.length === 10 ? `${fromDate}T00:00` : fromDate
+        )
+
+        const to = new Date(
+          toDate.length === 10 ? `${toDate}T23:59` : toDate
+        )
+
+        if (from > to) {
+          setDateError(
+            'Data i godzina końcowa nie mogą być wcześniejsze niż początkowe.'
+          )
+          return false
+        }
       }
 
       setDateError('')
       return true
     }
-    async function fetchImages(from = '', to = '') {
-    setFilterLoading(true)
+    async function fetchImages(fromDate = '', fromTime = '', toDate = '', toTime = '') {
+      setFilterLoading(true)
 
-    try {
-      const params = new URLSearchParams()
+      try {
+        const params = new URLSearchParams()
 
-      if (from) {
-        params.set('from', new Date(from).toISOString())
+        if (fromDate) {
+          const from = new Date(`${fromDate}T${fromTime || '00:00'}`)
+          params.set('from', from.toISOString())
+        }
+
+        if (toDate) {
+          const to = new Date(`${toDate}T${toTime || '23:59'}`)
+          params.set('to', to.toISOString())
+        }
+
+        const query = params.toString()
+        const url = query ? `/api/images?${query}` : '/api/images'
+
+        const response = await fetch(url)
+        if (!response.ok) throw new Error('Nie udało się pobrać zdjęć')
+
+        const data = await response.json()
+        setImages(data.images)
+        setCurrentPage(1)
+        setSelectedImage(null)
+        setError(null)
+      } catch (error) {
+        console.error('Image loading failed:', error)
+        setError(error.message)
+      } finally {
+        setLoading(false)
+        setFilterLoading(false)
       }
-
-      if (to) {
-        params.set('to', new Date(to).toISOString())
-      }
-
-      const query = params.toString()
-      const url = query ? `/api/images?${query}` : '/api/images'
-
-      const response = await fetch(url)
-
-      if (!response.ok) {
-        throw new Error('Nie udało się pobrać zdjęć')
-      }
-
-      const data = await response.json()
-
-      setImages(data.images)
-      setCurrentPage(1)
-      setSelectedImage(null)
-      setError(null)
-
-    } catch (error) {
-      console.error('Image loading failed:', error)
-      setError(error.message)
-
-    } finally {
-      setLoading(false)
-      setFilterLoading(false)
     }
-  }
     useEffect(() => {
     fetchImages()
   }, [])
@@ -487,34 +497,95 @@ function App() {
           {showImageFilter && (
           <div className="image-filter-content">
             <div className="image-filter-controls">
-                  <div className="image-filter-field">
-                    <label htmlFor="filterFrom">Od:</label>
-                    <input
-                      type="datetime-local"
-                      id="filterFrom"
-                      value={filterFrom}
-                      onChange={(event) => {
-                        setFilterFrom(event.target.value)
-                        validateDateRange(event.target.value, filterTo)
-                      }}
-                    />
-                  </div>
+              <div className="image-filter-field">
+                <label htmlFor="filterFromDate">Data od:</label>
+                <input
+                  type="date"
+                  id="filterFromDate"
+                  value={filterFromDate}
+                  onChange={(event) => {
+                    setFilterFromDate(event.target.value)
+                    validateDateRange(
+                      event.target.value && filterFromTime
+                        ? `${event.target.value}T${filterFromTime}`
+                        : event.target.value,
+                      filterToDate && filterToTime
+                        ? `${filterToDate}T${filterToTime}`
+                        : filterToDate
+                    )
+                  }}
+                />
+              </div>
 
-                  <div className="image-filter-field">
-                    <label htmlFor="filterTo">Do:</label>
-                    <input
-                      type="datetime-local"
-                      id="filterTo"
-                      value={filterTo}
-                      onChange={(event) => {
-                        setFilterTo(event.target.value)
-                        validateDateRange(filterFrom, event.target.value)
-                      }}
-                    />
-                  </div>
+              <div className="image-filter-field">
+                <label htmlFor="filterFromTime">Godzina od:</label>
+                <input
+                  type="time"
+                  id="filterFromTime"
+                  value={filterFromTime}
+                  onChange={(event) => {
+                    setFilterFromTime(event.target.value)
+
+                    validateDateRange(
+                      filterFromDate
+                        ? `${filterFromDate}T${event.target.value || '00:00'}`
+                        : '',
+                      filterToDate
+                        ? `${filterToDate}T${filterToTime || '23:59'}`
+                        : ''
+                    )
+                  }}
+                />
+              </div>
+
+              <div className="image-filter-field">
+                <label htmlFor="filterToDate">Data do:</label>
+                <input
+                  type="date"
+                  id="filterToDate"
+                  value={filterToDate}
+                  onChange={(event) => {
+                    setFilterToDate(event.target.value)
+                    validateDateRange(
+                      filterFromDate && filterFromTime
+                        ? `${filterFromDate}T${filterFromTime}`
+                        : filterFromDate,
+                      event.target.value && filterToTime
+                        ? `${event.target.value}T${filterToTime}`
+                        : event.target.value
+                    )
+                  }}
+                />
+              </div>
+
+              <div className="image-filter-field">
+                <label htmlFor="filterToTime">Godzina do:</label>
+                <input
+                  type="time"
+                  id="filterToTime"
+                  value={filterToTime}
+                  onChange={(event) => {
+                    setFilterToTime(event.target.value)
+
+                    validateDateRange(
+                      filterFromDate
+                        ? `${filterFromDate}T${filterFromTime || '00:00'}`
+                        : '',
+                      filterToDate
+                        ? `${filterToDate}T${event.target.value || '23:59'}`
+                        : ''
+                    )
+                  }}
+                />
+              </div>
                   <button
                     type="button"
-                    onClick={() => fetchImages(filterFrom, filterTo)}
+                    onClick={() => fetchImages(
+                      filterFromDate,
+                      filterFromTime,
+                      filterToDate,
+                      filterToTime
+                    )}
                     disabled={filterLoading || !!dateError}
                   >
                     {filterLoading ? 'Filtrowanie...' : 'Filtruj'}
@@ -522,21 +593,21 @@ function App() {
 
                   <button
                     type="button"
-                      onClick={() => {
-                        setFilterFrom('')
-                        setFilterTo('')
-                        setDateError('')
-                        fetchImages('', '')
-                      }}
+                    onClick={() => {
+                      setFilterFromDate('')
+                      setFilterFromTime('')
+                      setFilterToDate('')
+                      setFilterToTime('')
+                      setDateError('')
+                      fetchImages()
+                    }}
                     disabled={filterLoading}
                   >
                     Wyczyść filtr
                   </button>
                     {dateError && (
                       <div className="date-filter-warning">
-                        <strong>Uwaga! </strong> 
-                        <p>Data końcowa nie może być wcześniejsza
-                        niż data początkowa.</p>
+                        <strong>Uwaga!</strong>{' '} Nieprawidłowy zakres dat.
                       </div>
                     )}
                 </div>
