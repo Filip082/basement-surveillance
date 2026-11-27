@@ -8,7 +8,7 @@ Firmware for the Seeed XIAO nRF52840 + Wio-SX1262 LoRa module, Zephyr v4.4.2.
 | `prj.conf`                | Kconfig options (LoRa enabled)                          |
 | `boards/xiao_ble.overlay` | Wio-SX1262 wiring (SPI + control pins)                  |
 | `src/main.c`              | Application code                                        |
-| `CMakeLists.txt`          | Build setup (enables the USB console snippet)           |
+| `CMakeLists.txt`          | Build setup                                             |
 
 ## Open the dev container
 
@@ -50,7 +50,7 @@ Messages printed before the port is opened are lost, e.g. the hello message righ
 
 ## Notes
 
-- USB console comes from Zephyr's `cdc-acm-console` snippet, set in `CMakeLists.txt`.
+- USB console comes from the `xiao_ble` board itself (CDC ACM backend). Do not add the `cdc-acm-console` snippet: it creates a second USB port the PC never sees and sends the console there.
 - Upgrading Zephyr: change `revision` in `west.yml` **and** `ZEPHYR_VERSION` /
   `ZEPHYR_SDK_VERSION` in `.devcontainer/Dockerfile`, then rebuild the container and
   run `west update` in `/workdir`.
