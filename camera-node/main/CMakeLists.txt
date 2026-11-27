@@ -1,2 +1,10 @@
 idf_component_register(SRCS "camera_node.c"
-                    INCLUDE_DIRS ".")
+                            "node_log.c"
+                            "node_config.c"
+                            "camera_service.c"
+                            "als.c"
+                            "board_io.c"
+                            "power.c"
+                            "ble_link.c"
+                       INCLUDE_DIRS "."
+                       PRIV_REQUIRES bt nvs_flash esp_timer esp_rom esp_driver_gpio esp_driver_i2c)

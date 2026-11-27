@@ -1,0 +1,113 @@
+menu "Camera node"
+
+    config NODE_WAKE_GPIO
+        int "Wake-up input GPIO"
+        range 0 21
+        default 10
+        help
+            Light-sleep wake-up input. GPIO10 is the SD_CS line of the unused
+            microSD socket on the DFR1154 (keep the socket empty).
+
+    config NODE_DEBUG_POLL_INSTEAD_OF_SLEEP
+        bool "Bench debugging: poll the wake pin instead of sleeping"
+        default n
+        help
+            Light sleep switches the USB serial/JTAG port off, so the serial
+            monitor disconnects (and the monitor's reconnect resets the chip).
+            Enable this to test the whole cycle with live logs; the node then
+            waits for the wake pin by polling (high power). Disable for real use.
+
+    config NODE_WAKE_LED_BLINK
+        bool "Blink the on-board LED (GPIO3) for 60 ms after every light-sleep wake-up"
+        default y
+        help
+            The USB serial port is off during light sleep, so this is the way to see
+            that the wake-up happened. Disable it for the final battery build.
+
+    config NODE_DEBUG_LED_STEPS
+        bool "Debug: show cycle progress on the LED (needs LOGS_ENABLED)"
+        default y
+        help
+            After each cycle step 6..13 the LED blinks (step-5) times, and one long
+            blink at step 14 (back to sleep). Where the blinking stops is where the
+            node got stuck. Adds ~10 s per cycle: disable for real use.
+
+    config NODE_WAKE_ACTIVE_LOW
+        bool "Wake-up line is active LOW"
+        default n
+        help
+            Off: the event drives the pin HIGH (internal pull-down keeps it low
+            when idle). On: the event pulls the pin LOW (internal pull-up).
+            Wake-up is level triggered: the line must go back to idle before the
+            node can sleep again.
+
+    config NODE_CAMERA_XCLK_MHZ
+        int "Camera XCLK (MHz)"
+        range 5 24
+        default 10
+        help
+            10 MHz is known-good on this board. Higher = faster frames = faster
+            capture. If you see "cam_hal: FB-OVF" or garbled frames, lower it.
+
+    config NODE_CAMERA_VFLIP
+        bool "Flip image vertically"
+        default y
+
+    config NODE_CAMERA_HMIRROR
+        bool "Mirror image horizontally"
+        default n
+
+    config NODE_BLE_DEVICE_NAME
+        string "BLE device name"
+        default "DFR1154-CAM"
+
+    config NODE_BLE_CONNECT_TIMEOUT_MS
+        int "Wait for the computer to connect after waking (ms)"
+        range 1000 120000
+        default 10000
+        help
+            Advertising stops and the node goes back to sleep after this time
+            if no paired computer connected and subscribed.
+
+    config NODE_BLE_PAIRING_WINDOW_S
+        int "Pairing window after power-up / BOOT held (seconds)"
+        range 5 600
+        default 60
+        help
+            At power-up with no paired computer (or with BOOT held) the node
+            advertises this long so you can pair it.
+
+    config NODE_BLE_ACK_TIMEOUT_MS
+        int "Wait for the computer's ACK after sending (ms)"
+        range 100 10000
+        default 2000
+        help
+            The receiver confirms a complete frame; the node disconnects right
+            away. A receiver that cannot ACK costs this much extra awake time.
+
+    config NODE_BLE_REQUIRE_ENCRYPTION
+        bool "Only send images over a paired (encrypted) link"
+        default y
+
+    choice NODE_BLE_PAIRING_METHOD
+        prompt "Pairing method"
+        default NODE_BLE_PAIRING_JUST_WORKS
+        help
+            Just Works: no PIN, anyone in range who pairs first is accepted.
+            Fixed passkey: the computer must enter the PIN below (protects
+            against strangers, but the bleak-based tools/receiver.py on
+            Windows cannot type PINs - pair via the Windows Bluetooth settings).
+
+        config NODE_BLE_PAIRING_JUST_WORKS
+            bool "Just Works"
+        config NODE_BLE_PAIRING_PASSKEY
+            bool "Fixed passkey"
+    endchoice
+
+    config NODE_BLE_PASSKEY
+        int "Fixed passkey (6 digits)"
+        range 0 999999
+        default 123456
+        depends on NODE_BLE_PAIRING_PASSKEY
+
+endmenu
